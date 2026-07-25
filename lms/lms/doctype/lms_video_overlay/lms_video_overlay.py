@@ -15,6 +15,7 @@ import json
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.rate_limiter import rate_limit
 
 from lms.lms.language_platform.question_utils import (
 	AUTO_GRADABLE_TYPES,
@@ -143,6 +144,7 @@ def get_lesson_overlays(lesson: str, batch: str | None = None) -> list[dict]:
 
 
 @frappe.whitelist()
+@rate_limit(limit=500, seconds=60 * 60)
 def save_overlay(overlay: str, expected_version: int | str | None = None) -> dict:
 	"""Create or update an overlay with optimistic locking (§4.5.2).
 
@@ -177,6 +179,7 @@ def save_overlay(overlay: str, expected_version: int | str | None = None) -> dic
 
 
 @frappe.whitelist()
+@rate_limit(limit=1000, seconds=60 * 60)
 def submit_overlay_answer(overlay: str, answer: str) -> dict:
 	"""Record a student's answer to a question overlay and grade it."""
 	if frappe.session.user == "Guest":

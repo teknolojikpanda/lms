@@ -15,6 +15,7 @@ import json
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.rate_limiter import rate_limit
 from frappe.utils import add_to_date, get_datetime, now_datetime
 
 from lms.lms.language_platform.question_utils import (
@@ -106,6 +107,7 @@ def _marshal_attempt(attempt) -> dict:
 
 
 @frappe.whitelist()
+@rate_limit(limit=30, seconds=60 * 60)
 def start_placement(blueprint: str) -> dict:
 	"""Start (or resume) a placement attempt for the current user."""
 	_require_login()
@@ -186,6 +188,7 @@ def start_placement(blueprint: str) -> dict:
 
 
 @frappe.whitelist()
+@rate_limit(limit=2000, seconds=60 * 60)
 def save_placement_answer(attempt: str, question: str, answer: str) -> dict:
 	"""Autosave a single answer (Ek-4.2.5 'otomatik kaydet')."""
 	_require_login()
@@ -207,6 +210,7 @@ def save_placement_answer(attempt: str, question: str, answer: str) -> dict:
 
 
 @frappe.whitelist()
+@rate_limit(limit=60, seconds=60 * 60)
 def submit_placement(attempt: str, answers: str | None = None) -> dict:
 	"""Grade the attempt. Late submissions only count autosaved answers."""
 	_require_login()
@@ -280,6 +284,7 @@ def get_placement_result(attempt: str) -> dict:
 
 
 @frappe.whitelist()
+@rate_limit(limit=200, seconds=60 * 60)
 def override_placement_level(attempt: str, level: str, reason: str) -> dict:
 	"""Admin override of the computed level — audit is mandatory (§4.6.2)."""
 	if not has_moderator_role():

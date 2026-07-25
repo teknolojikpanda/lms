@@ -155,6 +155,7 @@ scheduler_events = {
 		"lms.lms.doctype.lms_course.lms_course.send_notification_for_published_courses",
 		"lms.lms.doctype.course_lesson.course_lesson.rename_settled_untitled_lessons",
 		"lms.lms.language_platform.speaking_pipeline.purge_expired_audio",
+		"lms.lms.language_platform.retention.run_retention_jobs",
 	],
 }
 

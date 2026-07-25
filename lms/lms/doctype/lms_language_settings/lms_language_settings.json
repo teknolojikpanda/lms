@@ -15,7 +15,11 @@
   "max_exam_duration_seconds",
   "column_break_limits",
   "daily_speaking_quota_minutes",
-  "audio_retention_days"
+  "audio_retention_days",
+  "retention_section",
+  "transcript_retention_days",
+  "column_break_retention",
+  "exam_retention_days"
  ],
  "fields": [
   {
@@ -86,6 +90,32 @@
    "fieldname": "audio_retention_days",
    "fieldtype": "Int",
    "label": "Audio Retention (days)",
+   "non_negative": 1
+  },
+  {
+   "description": "Ek-2 retention matrix. Set a value to 0 to keep that data indefinitely.",
+   "fieldname": "retention_section",
+   "fieldtype": "Section Break",
+   "label": "Retention (Ek-2)"
+  },
+  {
+   "default": "365",
+   "description": "Speaking transcripts are cleared after this many days; scores are kept.",
+   "fieldname": "transcript_retention_days",
+   "fieldtype": "Int",
+   "label": "Transcript Retention (days)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_retention",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "730",
+   "description": "Completed placement attempts are deleted after this many days.",
+   "fieldname": "exam_retention_days",
+   "fieldtype": "Int",
+   "label": "Exam Result Retention (days)",
    "non_negative": 1
   }
  ],
