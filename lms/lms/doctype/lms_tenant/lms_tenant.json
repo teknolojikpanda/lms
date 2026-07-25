@@ -1,0 +1,197 @@
+{
+ "actions": [],
+ "autoname": "field:subdomain",
+ "creation": "2026-07-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "tenant_name",
+  "subdomain",
+  "site_name",
+  "column_break_head",
+  "status",
+  "tenant_type",
+  "plan",
+  "section_break_capacity",
+  "seat_limit",
+  "active_students",
+  "column_break_capacity",
+  "renewal_date",
+  "suspended_reason",
+  "section_break_contact",
+  "contact_person",
+  "contact_email",
+  "column_break_contact",
+  "contact_phone",
+  "section_break_ops",
+  "provisioned_at",
+  "provisioning_notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "tenant_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Institution Name",
+   "reqd": 1
+  },
+  {
+   "description": "DNS label for the tenant site: <subdomain>.<platform domain>. Lowercase letters, digits and hyphens only; cannot be changed after provisioning.",
+   "fieldname": "subdomain",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Subdomain",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "Frappe site name, derived from the subdomain and the platform domain.",
+   "fieldname": "site_name",
+   "fieldtype": "Data",
+   "label": "Site Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Requested",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Requested\nProvisioning\nActive\nSuspended\nArchived",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "Dershane",
+   "fieldname": "tenant_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Type",
+   "options": "Dershane\nUniversite\nDiger"
+  },
+  {
+   "default": "Pilot",
+   "fieldname": "plan",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Plan",
+   "options": "Pilot\nGrowth\nEnterprise"
+  },
+  {
+   "fieldname": "section_break_capacity",
+   "fieldtype": "Section Break",
+   "label": "Capacity"
+  },
+  {
+   "default": "500",
+   "description": "Maximum active students. 0 means unlimited.",
+   "fieldname": "seat_limit",
+   "fieldtype": "Int",
+   "label": "Seat Limit",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "description": "Synced from the tenant site; not authoritative between syncs.",
+   "fieldname": "active_students",
+   "fieldtype": "Int",
+   "label": "Active Students",
+   "non_negative": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_capacity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "renewal_date",
+   "fieldtype": "Date",
+   "label": "Renewal Date"
+  },
+  {
+   "depends_on": "eval:doc.status == 'Suspended'",
+   "fieldname": "suspended_reason",
+   "fieldtype": "Small Text",
+   "label": "Suspension Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_contact",
+   "fieldtype": "Section Break",
+   "label": "Contact"
+  },
+  {
+   "fieldname": "contact_person",
+   "fieldtype": "Data",
+   "label": "Contact Person"
+  },
+  {
+   "fieldname": "contact_email",
+   "fieldtype": "Data",
+   "label": "Contact Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "column_break_contact",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "contact_phone",
+   "fieldtype": "Data",
+   "label": "Contact Phone",
+   "options": "Phone"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_ops",
+   "fieldtype": "Section Break",
+   "label": "Provisioning"
+  },
+  {
+   "fieldname": "provisioned_at",
+   "fieldtype": "Datetime",
+   "label": "Provisioned At",
+   "read_only": 1
+  },
+  {
+   "description": "Recorded by the provisioning CLI: site creation, app install and admin seeding.",
+   "fieldname": "provisioning_notes",
+   "fieldtype": "Small Text",
+   "label": "Provisioning Notes",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Tenant",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "show_title_field_in_link": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "tenant_name",
+ "track_changes": 1
+}

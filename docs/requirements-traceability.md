@@ -5,7 +5,8 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 
 | § | Requirement | Status | Where |
 |---|---|---|---|
-| 1.1 | B2B multi-tenant, tenant isolation | 🔨 | Tenant = Frappe site (ADR-0001); provisioning automation 🏗️ |
+| 1.1 | B2B multi-tenant, tenant isolation | 🔨 | Tenant = Frappe site (ADR-0001). `LMS Tenant` registry + lifecycle APIs (owner portal) and `provisioning/provision_tenant.py` CLI (site create/suspend/resume). Privileged step deliberately kept off the request path |
+| 1.3 | Onboarding: 1 institution, 10 classes, 500 students in a day | 🔨 | CSV roster import (`tenant_setup.import_roster_csv`) creating students + classes with per-row error reporting and seat-limit enforcement; runbook in `docs/tenant-onboarding-runbook.md` |
 | 3.1 | 4-role hierarchy | ✅ | Role mapping in ADR-0001 (Moderator / Course Creator / Batch Evaluator / LMS Student) |
 | 3.2 | Separate portal URLs | ✅/⏭️ | SPA route groups per role; subdomain per tenant 🏗️ |
 | 4.1 | Landing page + lead form | ⏭️ | Frappe Web Pages / static site; references list doctype ⏭️ |
@@ -47,6 +48,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 4. **Hardening (done):** endpoint rate limits, server-authoritative exam timer, DSAR
    export/erasure with approval workflow, Ek-2 retention purge jobs.
 5. **Load tests (done):** k6 suite in `load-tests/` with §6.2 thresholds as pass/fail gates.
-6. **Remaining:** run the suite against staging to record baseline numbers, browser-based
-   player soak test (§6.6), OpenSearch for question/transcript search at scale (§8.10),
-   site-per-tenant provisioning automation, AWS Organizations/SCP (§8.6).
+6. **Provisioning (done):** tenant registry, provisioning CLI, roster import, runbook.
+7. **Remaining:** run the load suite against staging to record baseline numbers,
+   browser-based player soak test (§6.6), OpenSearch for question/transcript search at
+   scale (§8.10), AWS Organizations/SCP (§8.6), tenant archival/offboarding automation.
