@@ -27,7 +27,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 6.3 | Accessibility: 6 font steps, whiteboard mode, WCAG AA | ⏭️ | frontend increment (CSS vars exist in frappe-ui theme) |
 | 6.4 | KVKK: retention, audit log, encryption | 🔨/🏗️ | `track_changes` on all new doctypes + override audit comments 🔨; S3/KMS 🏗️ |
 | 7.3 | API error envelope + correlationId | 🔨 | `lms/lms/language_platform/envelope.py` decorator used by module APIs |
-| 8.x | AWS infra (VPC, ECS, CloudFront, S3, Step Functions…) | 🏗️ | Terraform repo (out of app-repo scope; see agreement Ek-5) |
+| 8.x | AWS infra (VPC, ECS, CloudFront, S3, …) | 🔨 | **`dil-platformu-infra`** repo: 9 Terraform modules (network, data, compute, edge, media, ai, security, observability, finops) + bootstrap + dev/prod roots; `terraform validate` green. Remaining: AWS Organizations/SCP (§8.6), MediaPackage DRM, DR replication |
 | 9.1 | Input validation, RBAC, rate limits | ✅/🔨 | Frappe schema validation + role perms; per-endpoint checks in new APIs 🔨 |
 | 10.1 | Mandatory tests (blueprint respected, no dupes, deterministic seed, isolation) | 🔨 | `lms/tests/language_platform/` (pure unit) + doctype test stubs (bench CI) |
 | Ek-1 | RBAC matrix | 🔨 | Doctype permission tables on new doctypes mirror Ek-1 |
