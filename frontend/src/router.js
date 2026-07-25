@@ -233,6 +233,33 @@ const routes = [
 		props: true,
 	},
 	{
+		path: '/placement-tests',
+		name: 'PlacementTests',
+		component: () => import('@/pages/PlacementTests.vue'),
+	},
+	{
+		path: '/placement-tests/:blueprintName/take',
+		name: 'PlacementAttempt',
+		component: () => import('@/pages/PlacementAttempt.vue'),
+		props: true,
+	},
+	{
+		path: '/lessons/:lessonName/overlays',
+		name: 'VideoOverlayEditor',
+		component: () => import('@/pages/VideoOverlayEditor.vue'),
+		props: true,
+	},
+	{
+		path: '/speaking-practice',
+		name: 'SpeakingPractice',
+		component: () => import('@/pages/SpeakingPractice.vue'),
+	},
+	{
+		path: '/speaking-grading',
+		name: 'SpeakingGrading',
+		component: () => import('@/pages/SpeakingGrading.vue'),
+	},
+	{
 		path: '/data-import',
 		name: 'DataImportList',
 		component: () => import('@/pages/DataImport.vue'),

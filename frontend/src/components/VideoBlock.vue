@@ -88,7 +88,26 @@
 							class="absolute top-0 h-full w-2 bg-surface-amber-3"
 						></div>
 					</div>
+					<!-- OVERLAY MARKERS (timestamped notes/questions) -->
+					<div class="absolute top-0 start-0 w-full h-full pointer-events-none">
+						<div
+							v-for="overlay in overlays"
+							:key="overlay.name"
+							:style="getOverlayMarkerStyle(overlay.timestamp_ms)"
+							class="absolute top-0 h-full w-2"
+							:class="overlay.type === 'Question' ? 'bg-surface-blue-2' : 'bg-surface-green-3'"
+						></div>
+					</div>
 				</div>
+				<!-- Transient card for non-pausing note overlays -->
+				<transition name="fade">
+					<div
+						v-if="floatingNote"
+						class="absolute top-3 end-3 max-w-sm rounded-md bg-black/80 text-ink-white p-3 text-sm shadow-lg"
+					>
+						<div class="prose prose-sm prose-invert max-w-none" v-html="floatingNote.note_text"></div>
+					</div>
+				</transition>
 
 				<span class="text-sm-medium">
 					{{ formatSeconds(currentTime) }} / {{ formatSeconds(duration) }}
@@ -137,6 +156,12 @@
 		:saveQuizzes="saveQuizzes"
 		:duration="duration"
 	/>
+	<OverlayPopup
+		v-model="showOverlayPopup"
+		:overlay="currentOverlay"
+		@closed="resumeAfterOverlay"
+		@answered="markOverlayAnswered"
+	/>
 	<Dialog v-model:open="showQuizLoader" size="sm" bare>
 		<template #default>
 			<div class="flex flex-col space-y-2 p-5 text-base leading-5">
@@ -161,6 +186,9 @@ import { formatSeconds, formatTimestamp } from '@/utils/format'
 import { useSettings } from '@/stores/settings'
 import Play from '@/components/Icons/Play.vue'
 import QuizInVideo from '@/components/Modals/QuizInVideo.vue'
+import OverlayPopup from '@/components/Modals/OverlayPopup.vue'
+import { overlayContext } from '@/stores/overlayContext'
+import { getLessonOverlays } from '@/utils/langApi'
 
 const videoRef = ref(null)
 const videoContainer = ref(null)
@@ -175,6 +203,15 @@ const quizLoadTimer = ref(0)
 const currentQuiz = ref(null)
 const nextQuiz = ref({})
 const { settings } = useSettings()
+
+// Timestamped overlays (LMS Video Overlay) for the lesson on screen
+const overlays = ref([])
+const currentOverlay = ref(null)
+const showOverlayPopup = ref(false)
+const floatingNote = ref(null)
+const shownOverlays = new Set()
+let wasPlayingBeforeOverlay = false
+let floatingNoteTimeout = null
 
 // Speed control states
 const playbackSpeed = ref(1)
@@ -217,6 +254,74 @@ onMounted(() => {
 	}
 })
 
+watch(
+	() => overlayContext.lesson,
+	async (lesson) => {
+		if (!lesson || !props.readOnly || overlayContext.suspended) {
+			overlays.value = []
+			return
+		}
+		try {
+			const rows = await getLessonOverlays(lesson)
+			overlays.value = rows.sort((a, b) => a.timestamp_ms - b.timestamp_ms)
+		} catch {
+			// Overlays are an enhancement — never break video playback.
+			overlays.value = []
+		}
+	},
+	{ immediate: true }
+)
+
+const checkOverlays = (timeSeconds) => {
+	if (showOverlayPopup.value || showQuiz.value) return
+	const due = overlays.value.find(
+		(overlay) =>
+			!shownOverlays.has(overlay.name) &&
+			timeSeconds >= overlay.timestamp_ms / 1000 &&
+			timeSeconds <= overlay.timestamp_ms / 1000 + 1.5
+	)
+	if (!due) return
+
+	shownOverlays.add(due.name)
+
+	// Already-answered questions never interrupt playback again.
+	if (due.type === 'Question' && due.response) return
+
+	if (due.type === 'Question' || due.pause_video) {
+		wasPlayingBeforeOverlay = playing.value
+		videoRef.value?.pause()
+		playing.value = false
+		currentOverlay.value = due
+		showOverlayPopup.value = true
+	} else {
+		floatingNote.value = due
+		clearTimeout(floatingNoteTimeout)
+		floatingNoteTimeout = setTimeout(() => {
+			floatingNote.value = null
+		}, 8000)
+	}
+}
+
+const resumeAfterOverlay = () => {
+	currentOverlay.value = null
+	if (wasPlayingBeforeOverlay && videoRef.value) {
+		videoRef.value.play()
+		playing.value = true
+	}
+}
+
+const markOverlayAnswered = (overlayName, feedback) => {
+	const overlay = overlays.value.find((row) => row.name === overlayName)
+	if (overlay) overlay.response = feedback
+}
+
+const getOverlayMarkerStyle = (timestampMs) => {
+	const percentage = (timestampMs / 1000 / Math.ceil(duration.value || 1)) * 100
+	return {
+		insetInlineStart: `${Math.min(percentage, 99)}%`,
+	}
+}
+
 const updateCurrentTime = () => {
 	setTimeout(() => {
 		videoRef.value.onloadedmetadata = () => {
@@ -224,6 +329,7 @@ const updateCurrentTime = () => {
 		}
 		videoRef.value.ontimeupdate = () => {
 			currentTime.value = videoRef.value?.currentTime || currentTime.value
+			checkOverlays(currentTime.value)
 			if (currentTime.value >= nextQuiz.value.time) {
 				videoRef.value.pause()
 				playing.value = false
@@ -369,6 +475,15 @@ const dropdownOptions = computed(() =>
 iframe {
 	width: 100%;
 	min-height: 500px;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+	transition: opacity 0.3s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+	opacity: 0;
 }
 
 .duration-slider {

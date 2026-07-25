@@ -536,6 +536,24 @@ const getSidebarItems = (forMobile = false) => {
 					},
 				},
 				{
+					label: 'Placement Test',
+					icon: 'Gauge',
+					to: 'PlacementTests',
+					activeFor: ['PlacementTests', 'PlacementAttempt'],
+					condition: () => {
+						return userResource?.data
+					},
+				},
+				{
+					label: 'Speaking',
+					icon: 'Mic',
+					to: 'SpeakingPractice',
+					activeFor: ['SpeakingPractice'],
+					condition: () => {
+						return userResource?.data
+					},
+				},
+				{
 					label: 'Jobs',
 					icon: 'Briefcase',
 					to: 'Jobs',
@@ -608,6 +626,15 @@ const getSidebarItems = (forMobile = false) => {
 						'ProgrammingExerciseSubmissions',
 						'ProgrammingExerciseSubmission',
 					],
+				},
+				{
+					label: 'Speaking Grading',
+					icon: 'Mic',
+					to: 'SpeakingGrading',
+					condition: () => {
+						return !forMobile && isAdmin()
+					},
+					activeFor: ['SpeakingGrading'],
 				},
 			],
 		},
