@@ -19,6 +19,7 @@ QUESTION_POSSIBILITY_FIELDS = [f"possibility_{i}" for i in range(1, 11)]
 class LMSQuestion(Document):
 	def validate(self):
 		validate_correct_answers(self)
+		validate_difficulty(self)
 		update_question_title(self)
 
 
@@ -29,6 +30,11 @@ def validate_correct_answers(question):
 		validate_correct_options(question)
 	elif question.type == "User Input":
 		validate_possible_answer(question)
+
+
+def validate_difficulty(question):
+	if question.difficulty and not (1 <= question.difficulty <= 5):
+		frappe.throw(_("Difficulty must be between 1 and 5."))
 
 
 def validate_duplicate_options(question):

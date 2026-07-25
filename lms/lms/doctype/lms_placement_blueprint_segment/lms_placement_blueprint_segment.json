@@ -1,0 +1,55 @@
+{
+ "actions": [],
+ "creation": "2026-07-25 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "skill",
+  "level",
+  "topic",
+  "question_count"
+ ],
+ "fields": [
+  {
+   "fieldname": "skill",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Skill",
+   "options": "\nGrammar\nVocabulary\nReading\nListening\nSpeaking\nWriting"
+  },
+  {
+   "fieldname": "level",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Level (CEFR)",
+   "options": "\nA1\nA2\nB1\nB2\nC1\nC2"
+  },
+  {
+   "fieldname": "topic",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Topic"
+  },
+  {
+   "default": "1",
+   "fieldname": "question_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Question Count",
+   "non_negative": 1,
+   "reqd": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Placement Blueprint Segment",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

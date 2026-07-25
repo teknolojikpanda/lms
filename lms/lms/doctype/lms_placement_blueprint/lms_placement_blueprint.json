@@ -1,0 +1,147 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:PLB-{#####}",
+ "creation": "2026-07-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "enabled",
+  "column_break_meta",
+  "max_attempts",
+  "duration",
+  "default_level",
+  "section_break_desc",
+  "description",
+  "section_break_segments",
+  "segments",
+  "section_break_mapping",
+  "level_mappings"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "column_break_meta",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "max_attempts",
+   "fieldtype": "Int",
+   "label": "Max Attempts",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "duration",
+   "fieldtype": "Int",
+   "label": "Duration (in minutes)",
+   "non_negative": 1
+  },
+  {
+   "default": "A1",
+   "fieldname": "default_level",
+   "fieldtype": "Select",
+   "label": "Default Level (below all thresholds)",
+   "options": "A1\nA2\nB1\nB2\nC1\nC2"
+  },
+  {
+   "fieldname": "section_break_desc",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "section_break_segments",
+   "fieldtype": "Section Break",
+   "label": "Blueprint Segments"
+  },
+  {
+   "fieldname": "segments",
+   "fieldtype": "Table",
+   "label": "Segments",
+   "options": "LMS Placement Blueprint Segment",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_mapping",
+   "fieldtype": "Section Break",
+   "label": "Score to Level Mapping"
+  },
+  {
+   "fieldname": "level_mappings",
+   "fieldtype": "Table",
+   "label": "Level Mappings",
+   "options": "LMS Placement Level Mapping",
+   "reqd": 1
+  }
+ ],
+ "links": [
+  {
+   "link_doctype": "LMS Placement Attempt",
+   "link_fieldname": "blueprint"
+  }
+ ],
+ "modified": "2026-07-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Placement Blueprint",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Moderator",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Course Creator"
+  },
+  {
+   "read": 1,
+   "role": "LMS Student"
+  }
+ ],
+ "show_title_field_in_link": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

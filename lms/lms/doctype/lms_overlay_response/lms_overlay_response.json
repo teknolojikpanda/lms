@@ -1,0 +1,110 @@
+{
+ "actions": [],
+ "creation": "2026-07-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "overlay",
+  "member",
+  "lesson",
+  "column_break_head",
+  "answer",
+  "is_correct",
+  "marks_obtained"
+ ],
+ "fields": [
+  {
+   "fieldname": "overlay",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Overlay",
+   "options": "LMS Video Overlay",
+   "reqd": 1
+  },
+  {
+   "fieldname": "member",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Member",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "lesson",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Lesson",
+   "options": "Course Lesson"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "answer",
+   "fieldtype": "Small Text",
+   "label": "Answer"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_correct",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Correct"
+  },
+  {
+   "default": "0",
+   "fieldname": "marks_obtained",
+   "fieldtype": "Float",
+   "label": "Marks Obtained",
+   "non_negative": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Overlay Response",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Moderator",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Course Creator"
+  },
+  {
+   "read": 1,
+   "role": "LMS Student"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

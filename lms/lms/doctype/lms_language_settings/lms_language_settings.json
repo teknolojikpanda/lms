@@ -1,0 +1,123 @@
+{
+ "actions": [],
+ "creation": "2026-07-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "speaking_section",
+  "speaking_provider",
+  "transcribe_language_code",
+  "column_break_provider",
+  "aws_region",
+  "bedrock_model_id",
+  "limits_section",
+  "max_practice_duration_seconds",
+  "max_exam_duration_seconds",
+  "column_break_limits",
+  "daily_speaking_quota_minutes",
+  "audio_retention_days"
+ ],
+ "fields": [
+  {
+   "fieldname": "speaking_section",
+   "fieldtype": "Section Break",
+   "label": "Speaking Assessment Provider"
+  },
+  {
+   "default": "Mock",
+   "fieldname": "speaking_provider",
+   "fieldtype": "Select",
+   "label": "Speaking Provider",
+   "options": "Mock\nAWS"
+  },
+  {
+   "default": "en-US",
+   "fieldname": "transcribe_language_code",
+   "fieldtype": "Data",
+   "label": "Transcribe Language Code"
+  },
+  {
+   "fieldname": "column_break_provider",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "eu-central-1",
+   "fieldname": "aws_region",
+   "fieldtype": "Data",
+   "label": "AWS Region"
+  },
+  {
+   "fieldname": "bedrock_model_id",
+   "fieldtype": "Data",
+   "label": "Bedrock Model Id"
+  },
+  {
+   "fieldname": "limits_section",
+   "fieldtype": "Section Break",
+   "label": "Limits and Retention (MUST, §8.13)"
+  },
+  {
+   "default": "120",
+   "fieldname": "max_practice_duration_seconds",
+   "fieldtype": "Int",
+   "label": "Max Practice Recording (seconds)",
+   "non_negative": 1
+  },
+  {
+   "default": "300",
+   "fieldname": "max_exam_duration_seconds",
+   "fieldtype": "Int",
+   "label": "Max Exam Recording (seconds)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_limits",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "30",
+   "fieldname": "daily_speaking_quota_minutes",
+   "fieldtype": "Int",
+   "label": "Daily Speaking Quota per Student (minutes)",
+   "non_negative": 1
+  },
+  {
+   "default": "30",
+   "fieldname": "audio_retention_days",
+   "fieldtype": "Int",
+   "label": "Audio Retention (days)",
+   "non_negative": 1
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Language Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Moderator",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
