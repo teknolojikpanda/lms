@@ -30,6 +30,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 8.x | AWS infra (VPC, ECS, CloudFront, S3, …) | 🔨 | **`dil-platformu-infra`** repo: 9 Terraform modules (network, data, compute, edge, media, ai, security, observability, finops) + bootstrap + dev/prod roots; `terraform validate` green. Remaining: AWS Organizations/SCP (§8.6), MediaPackage DRM, DR replication |
 | 9.1 | Input validation, RBAC, rate limits | ✅/🔨 | Frappe schema validation + role perms; per-endpoint checks in new APIs; `rate_limit` on placement start/submit/autosave, speaking upload, overlay writes and all score overrides 🔨 |
 | 9.2 | KVKK technical rights (DSAR) | 🔨 | `LMS Data Request` (Export/Erasure, Pending→Approved→Completed, four-eyes gate: erasure cannot be self-approved) + `dsar.py` / `privacy_rules.py`. Export = full JSON of everything stored about the person; erasure = anonymise (academic records kept pseudonymously per "zorunlu saklama", personal free text deleted, speaking audio destroyed immediately). Self-service export for students. **Residual flagged for legal review:** the login identifier persists in `owner`/`modified_by` columns — documented in `dsar._scrub_user_record` |
+| 6.6 | Load and performance tests | 🔨 | `load-tests/` k6 suite: exam start (1000 VU stampede, p95<800ms), exam taking (autosave p95<300ms), API CRUD, VOD cache hit ratio >85%, speaking time-to-score <5min — all as enforced thresholds. Seed script + README. Player soak test still manual |
 | 10.1 | Mandatory tests (blueprint respected, no dupes, deterministic seed, isolation) | 🔨 | `lms/tests/language_platform/` (pure unit) + doctype test stubs (bench CI) |
 | Ek-1 | RBAC matrix | 🔨 | Doctype permission tables on new doctypes mirror Ek-1 |
 | Ek-2 | Retention matrix | 🔨/🏗️ | Audio 30d, transcripts 1y, exam results 2y enforced by `retention.py` daily jobs (all configurable in LMS Language Settings) 🔨; S3 lifecycle policies in the infra repo 🏗️ |
@@ -45,6 +46,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
    provisioning, VOD pipeline, CUR/FinOps.
 4. **Hardening (done):** endpoint rate limits, server-authoritative exam timer, DSAR
    export/erasure with approval workflow, Ek-2 retention purge jobs.
-5. **Remaining:** load/performance tests for exam start and player stability (§6.6),
-   OpenSearch for question/transcript search at scale (§8.10), site-per-tenant
-   provisioning automation, AWS Organizations/SCP (§8.6).
+5. **Load tests (done):** k6 suite in `load-tests/` with §6.2 thresholds as pass/fail gates.
+6. **Remaining:** run the suite against staging to record baseline numbers, browser-based
+   player soak test (§6.6), OpenSearch for question/transcript search at scale (§8.10),
+   site-per-tenant provisioning automation, AWS Organizations/SCP (§8.6).
