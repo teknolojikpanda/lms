@@ -19,10 +19,10 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 4.7.1 | Question types incl. difficulty/duration metadata | ✅/🔨 | LMS Question ✅ + difficulty/level/skill/topic fields 🔨 |
 | 4.7.2 | **Deterministic blueprint randomization (MUST)** | 🔨 | `lms/lms/language_platform/exam_engine.py` — segment fill → remainder, no in-attempt duplicates, retake exposure control, seed persisted on attempt |
 | 4.7.3 | Exam security (server-authoritative timer, resume) | ✅/⏭️ | Quiz timer ✅ (server check ⏭️); attempt resume on placement 🔨 |
-| 4.8 | Progress events + risk heuristics | ✅/⏭️ | Course progress, watch duration ✅; risk scoring ⏭️ |
+| 4.8 | Progress events + risk heuristics | ✅/🔨 | Course progress, watch duration ✅; risky-student heuristic (inactivity + low scores) in `admin_api.py` surfaced on the institution dashboard 🔨 |
 | 4.9 | **AI speaking pipeline** | 🔨 | `LMS Speaking Prompt`, `LMS Speaking Submission` (+ rubric child); state machine Queued→Transcribing→Scoring→Ready/Failed; metrics (wpm, TTR, filler ratio); provider abstraction (mock default, AWS Transcribe/Bedrock adapters); teacher override preserves `ai_total_score`. UI: `SpeakingPractice.vue` (MediaRecorder, upload, polling, rubric feedback) + `SpeakingGrading.vue` (queue + audited override) |
 | 4.9.3 | Speaking data privacy (retention, disclosure) | 🔨/🏗️ | Retention days + daily quota in module settings 🔨; S3 lifecycle 🏗️ |
-| 4.10 | FinOps / CUR dashboards | 🏗️/⏭️ | CUR+Athena infra 🏗️; owner UI ⏭️ |
+| 4.10 | FinOps / CUR dashboards | 🔨/🏗️ | Owner dashboard with application-metered cost estimate (Ek-6.3 unit prices, clearly labelled) 🔨; authoritative CUR+Athena feed 🏗️ |
 | 5.1 | Stack (changed by ADR) | 🔨 | `docs/adr/ADR-0001-stack-change-frappe-lms.md` |
 | 6.3 | Accessibility: 6 font steps, whiteboard mode, WCAG AA | ⏭️ | frontend increment (CSS vars exist in frappe-ui theme) |
 | 6.4 | KVKK: retention, audit log, encryption | 🔨/🏗️ | `track_changes` on all new doctypes + override audit comments 🔨; S3/KMS 🏗️ |
@@ -32,7 +32,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 10.1 | Mandatory tests (blueprint respected, no dupes, deterministic seed, isolation) | 🔨 | `lms/tests/language_platform/` (pure unit) + doctype test stubs (bench CI) |
 | Ek-1 | RBAC matrix | 🔨 | Doctype permission tables on new doctypes mirror Ek-1 |
 | Ek-2 | Retention matrix | 🔨/🏗️ | Speaking audio retention setting 🔨; lifecycle policies 🏗️ |
-| Ek-4 | Screen specs (4 portals) | 🔨/⏭️ | Existing LMS UI covers student/teacher course flows; new module screens delivered: placement taking, overlay editor + in-player overlays, speaking practice, grading center. Remaining: admin/owner dashboards per Ek-4.3/4.4 |
+| Ek-4 | Screen specs (4 portals) | 🔨/⏭️ | Existing LMS UI covers student/teacher course flows; new module screens delivered: placement taking, overlay editor + in-player overlays, speaking practice, grading center, institution dashboard (Ek-4.4: KPIs, placement distribution, activity, risky students, pending grading, quick actions) and owner dashboard (Ek-4.3: usage KPIs, trends, ops signals, cost estimate). Remaining Ek-4 detail screens (tenant list/billing, integrations, compliance) track the multi-site rollout |
 
 ## Increment plan
 

@@ -233,6 +233,16 @@ const routes = [
 		props: true,
 	},
 	{
+		path: '/admin-dashboard',
+		name: 'AdminDashboard',
+		component: () => import('@/pages/AdminDashboard.vue'),
+	},
+	{
+		path: '/owner-dashboard',
+		name: 'OwnerDashboard',
+		component: () => import('@/pages/OwnerDashboard.vue'),
+	},
+	{
 		path: '/placement-tests',
 		name: 'PlacementTests',
 		component: () => import('@/pages/PlacementTests.vue'),

@@ -64,6 +64,10 @@ export const overrideSpeakingScore = (submission, finalScore, reason) =>
 		reason,
 	})
 
+export const getAdminDashboard = () => invoke('get_admin_dashboard')
+
+export const getOwnerDashboard = () => invoke('get_owner_dashboard')
+
 /**
  * Upload a recorded Blob (e.g. MediaRecorder output) as a private file
  * attached to the given document, using Frappe's upload endpoint.
