@@ -14,7 +14,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 4.3 | Institution → branch → class → student | ✅/⏭️ | LMS Batch (+ enrollment); branch layer ⏭️ |
 | 4.4.1 | Course → unit → lesson hierarchy, CEFR + skill tags | ✅/🔨 | LMS Course/Chapter/Lesson ✅; CEFR metadata on questions 🔨 (`lms_question`) |
 | 4.4.2 | HLS player, subtitles, speed, shortcuts | ✅/🏗️ | Plyr-based video blocks ✅; HLS/ABR + signed cookies 🏗️ |
-| 4.4.3 | Video protection (signed cookies, DRM opt.) | 🏗️ | CloudFront + OAC (infra repo) |
+| 4.4.3 | Video protection (signed cookies, DRM opt.) | 🔨/🏗️ | MVP tier: CloudFront + OAC + signed cookies 🏗️. Enterprise tier: `modules/drm` (MediaPackage VOD + SPEKE) and `drm.py` (entitlement-checked licence proxy, short-lived playback tokens, per-platform DRM selection) — built to the §1.2 procurement boundary; licences, key provider and FairPlay certificate require a vendor contract. Player EME integration deliberately deferred until the vendor is chosen. See `docs/drm-enterprise.md` |
 | 4.5 | **Video overlay (timestamp question/note)** | 🔨 | `LMS Video Overlay`, `LMS Overlay Response` + APIs; rules: timestamp validation, optimistic `version` lock, scope visibility (Global/Course/Batch), question payload via LMS Question. UI: player integration in `VideoBlock.vue` (markers, pause+popup, answers) + teacher editor `VideoOverlayEditor.vue` |
 | 4.6 | **Placement test** (blueprint, score→level mapping, admin override + audit) | 🔨 | `LMS Placement Blueprint` (+segments, +level mapping), `LMS Placement Attempt`, APIs in the doctype controllers. UI: `PlacementTests.vue` + `PlacementAttempt.vue` (timer, autosave, per-skill result) |
 | 4.7.1 | Question types incl. difficulty/duration metadata | ✅/🔨 | LMS Question ✅ + difficulty/level/skill/topic fields 🔨 |
@@ -55,7 +55,9 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 8. **Organizations (done):** OUs, guardrail SCPs (unenforced pending staged rollout),
    Identity Center permission sets.
 9. **Offboarding (done):** archive/restore/purge with grace period and guards.
-10. **Remaining — all require a running environment or are Enterprise options:**
+10. **DRM (done to the procurement boundary):** MediaPackage/SPEKE infra + licence proxy.
+11. **Remaining — all require a running environment, a purchase, or both:**
     run the load + soak suites against staging to record baseline numbers, real-time
-    HLS/ABR player soak, staged SCP enforcement (Sandbox → NonProd → Prod), and the
-    Enterprise-package items MediaPackage DRM and DR region replication.
+    HLS/ABR player soak, staged SCP enforcement (Sandbox → NonProd → Prod), DRM vendor
+    procurement + player EME integration, forensic watermarking (Premium), and DR
+    region replication.

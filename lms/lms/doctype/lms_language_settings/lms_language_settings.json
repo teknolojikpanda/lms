@@ -27,7 +27,14 @@
   "column_break_search",
   "opensearch_use_iam",
   "opensearch_username",
-  "opensearch_password"
+  "opensearch_password",
+  "drm_section",
+  "drm_enabled",
+  "mediapackage_domain",
+  "drm_token_ttl_seconds",
+  "column_break_drm",
+  "drm_license_url",
+  "drm_license_token"
  ],
  "fields": [
   {
@@ -177,6 +184,53 @@
    "fieldname": "opensearch_password",
    "fieldtype": "Password",
    "label": "OpenSearch Password"
+  },
+  {
+   "description": "Enterprise video protection (§4.4.3). Off = MVP tier: CloudFront signed cookies. Enabling requires a third-party DRM licence agreement, which §1.2 places outside the delivery scope.",
+   "fieldname": "drm_section",
+   "fieldtype": "Section Break",
+   "label": "DRM (Enterprise)"
+  },
+  {
+   "default": "0",
+   "fieldname": "drm_enabled",
+   "fieldtype": "Check",
+   "label": "Enable DRM Playback"
+  },
+  {
+   "depends_on": "eval:doc.drm_enabled",
+   "description": "MediaPackage packaging group domain (Terraform output drm.packaging_group_domain_name).",
+   "fieldname": "mediapackage_domain",
+   "fieldtype": "Data",
+   "label": "MediaPackage Domain",
+   "mandatory_depends_on": "eval:doc.drm_enabled"
+  },
+  {
+   "default": "300",
+   "depends_on": "eval:doc.drm_enabled",
+   "description": "Playback tokens are shareable, so keep this short. Clamped to 30-3600 seconds.",
+   "fieldname": "drm_token_ttl_seconds",
+   "fieldtype": "Int",
+   "label": "Playback Token TTL (seconds)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_drm",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.drm_enabled",
+   "description": "Vendor licence server. Players never call this directly — requests are proxied so entitlement is checked first.",
+   "fieldname": "drm_license_url",
+   "fieldtype": "Data",
+   "label": "Licence Server URL",
+   "mandatory_depends_on": "eval:doc.drm_enabled"
+  },
+  {
+   "depends_on": "eval:doc.drm_enabled",
+   "fieldname": "drm_license_token",
+   "fieldtype": "Password",
+   "label": "Licence Server Token"
   }
  ],
  "issingle": 1,

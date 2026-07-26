@@ -20,6 +20,7 @@ from lms.lms.doctype.lms_speaking_submission import lms_speaking_submission as s
 from lms.lms.doctype.lms_tenant import lms_tenant as tenant
 from lms.lms.doctype.lms_video_overlay import lms_video_overlay as overlay
 from lms.lms.language_platform import admin_api, tenant_setup
+from lms.lms.language_platform import drm as drm_module
 from lms.lms.language_platform import search as search_module
 from lms.lms.language_platform.envelope import envelope
 
@@ -212,3 +213,22 @@ def get_searchable_sources():
 @envelope
 def rebuild_search_index(doctype: str | None = None):
 	return search_module.rebuild_index(doctype)
+
+
+@frappe.whitelist()
+@envelope
+def get_playback_config(lesson: str):
+	return drm_module.get_playback_config(lesson)
+
+
+@frappe.whitelist()
+def drm_license(playback_token: str, license_request: str):
+	"""Not envelope-wrapped: the player's CDM expects the licence payload
+	shape, not the platform's API envelope."""
+	return drm_module.drm_license(playback_token, license_request)
+
+
+@frappe.whitelist()
+@envelope
+def get_drm_status():
+	return drm_module.get_drm_status()
