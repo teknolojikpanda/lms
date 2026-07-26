@@ -1,6 +1,9 @@
 @import 'frappe-ui/style.css';
 @import 'frappe-ui/list-style.css';
 @import './styles/blockEditor.css';
+/* Last, so its font-scale and high-contrast overrides win over the
+   frappe-ui theme they are deliberately overriding (§6.3). */
+@import './styles/accessibility.css';
 
 /* This build makes --surface-sidebar transparent in dark mode; point it at
    gray-1 so the sidebar keeps a visible surface. */

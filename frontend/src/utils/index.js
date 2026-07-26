@@ -554,6 +554,15 @@ const getSidebarItems = (forMobile = false) => {
 					},
 				},
 				{
+					label: 'Accessibility',
+					icon: 'Accessibility',
+					to: 'AccessibilitySettings',
+					activeFor: ['AccessibilitySettings'],
+					condition: () => {
+						return userResource?.data
+					},
+				},
+				{
 					label: 'Jobs',
 					icon: 'Briefcase',
 					to: 'Jobs',

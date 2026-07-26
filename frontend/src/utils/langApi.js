@@ -68,6 +68,11 @@ export const getAdminDashboard = () => invoke('get_admin_dashboard')
 
 export const getOwnerDashboard = () => invoke('get_owner_dashboard')
 
+export const getAccessibilityPreferences = () => invoke('get_accessibility_preferences')
+
+export const saveAccessibilityPreferences = (preferences) =>
+	invoke('save_accessibility_preferences', preferences)
+
 export const getWatermark = (lesson) => invoke('get_watermark', { lesson })
 
 export const traceWatermark = (code) => invoke('trace_watermark', { code })

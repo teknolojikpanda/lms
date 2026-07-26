@@ -70,4 +70,19 @@ describe('language platform frontend modules', () => {
 		expect((await import('@/pages/AdminDashboard.vue')).default).toBeTruthy()
 		expect((await import('@/pages/OwnerDashboard.vue')).default).toBeTruthy()
 	})
+
+	it('compiles the accessibility panel and applies preferences to the root element', async () => {
+		expect((await import('@/components/AccessibilityPanel.vue')).default).toBeTruthy()
+		expect((await import('@/pages/AccessibilitySettings.vue')).default).toBeTruthy()
+
+		// The store's whole job is writing these attributes; accessibility.css
+		// is inert without them, so this is the contract worth pinning.
+		const store = await import('@/stores/accessibility')
+		store.initAccessibility()
+		const root = document.documentElement
+		expect(root.getAttribute('data-font-step')).toBeTruthy()
+		expect(root.getAttribute('data-contrast')).toBeTruthy()
+		expect(root.getAttribute('data-whiteboard')).toBeTruthy()
+		expect(root.getAttribute('data-reduce-motion')).toBeTruthy()
+	})
 })

@@ -19,6 +19,7 @@ from lms.lms.doctype.lms_placement_attempt import lms_placement_attempt as place
 from lms.lms.doctype.lms_speaking_submission import lms_speaking_submission as speaking
 from lms.lms.doctype.lms_tenant import lms_tenant as tenant
 from lms.lms.doctype.lms_video_overlay import lms_video_overlay as overlay
+from lms.lms.language_platform import accessibility as accessibility_module
 from lms.lms.language_platform import admin_api, tenant_setup
 from lms.lms.language_platform import dr as dr_module
 from lms.lms.language_platform import drm as drm_module
@@ -264,3 +265,25 @@ def record_restore_test(outcome: str, notes: str | None = None):
 @envelope
 def record_dr_drill(notes: str | None = None):
 	return dr_module.record_dr_drill(notes)
+
+
+@frappe.whitelist()
+@envelope
+def get_accessibility_preferences():
+	return accessibility_module.get_accessibility_preferences()
+
+
+@frappe.whitelist()
+@envelope
+def save_accessibility_preferences(
+	font_step=None, contrast_mode=None, whiteboard_mode=None, reduce_motion=None
+):
+	return accessibility_module.save_accessibility_preferences(
+		font_step, contrast_mode, whiteboard_mode, reduce_motion
+	)
+
+
+@frappe.whitelist()
+@envelope
+def get_contrast_audit():
+	return accessibility_module.get_contrast_audit()
