@@ -23,6 +23,7 @@ from __future__ import annotations
 import frappe
 
 from lms.lms.language_platform.privacy_rules import retention_cutoff
+from lms.lms.language_platform.search import remove_document
 
 PURGE_BATCH_SIZE = 500
 
@@ -55,6 +56,11 @@ def purge_expired_transcripts():
 			{"transcript": None},
 			update_modified=False,
 		)
+		# The search index holds a copy of the transcript text. Clearing
+		# only the database column would leave the personal data alive in
+		# the cluster past its Ek-2 window.
+		remove_document("LMS Speaking Submission", name)
+
 	if names:
 		frappe.db.commit()
 		frappe.logger("lms.retention").info(f"Purged {len(names)} expired transcripts")

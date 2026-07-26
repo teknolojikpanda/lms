@@ -133,6 +133,16 @@ doc_events = {
 		"validate": "lms.lms.user.validate_username_duplicates",
 		"before_insert": "lms.lms.user.add_lms_student_role",
 	},
+	# Keep the privileged-content search index in step (§8.10). No-ops
+	# unless the OpenSearch provider is configured.
+	"LMS Question": {
+		"on_update": "lms.lms.language_platform.search.on_doc_update",
+		"on_trash": "lms.lms.language_platform.search.on_doc_delete",
+	},
+	"LMS Speaking Submission": {
+		"on_update": "lms.lms.language_platform.search.on_doc_update",
+		"on_trash": "lms.lms.language_platform.search.on_doc_delete",
+	},
 }
 
 # Scheduled Tasks
@@ -156,6 +166,7 @@ scheduler_events = {
 		"lms.lms.doctype.course_lesson.course_lesson.rename_settled_untitled_lessons",
 		"lms.lms.language_platform.speaking_pipeline.purge_expired_audio",
 		"lms.lms.language_platform.retention.run_retention_jobs",
+		"lms.lms.language_platform.search.nightly_reindex",
 	],
 }
 

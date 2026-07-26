@@ -20,6 +20,7 @@ from lms.lms.doctype.lms_speaking_submission import lms_speaking_submission as s
 from lms.lms.doctype.lms_tenant import lms_tenant as tenant
 from lms.lms.doctype.lms_video_overlay import lms_video_overlay as overlay
 from lms.lms.language_platform import admin_api, tenant_setup
+from lms.lms.language_platform import search as search_module
 from lms.lms.language_platform.envelope import envelope
 
 
@@ -175,3 +176,21 @@ def check_tenant_capacity(tenant_name: str, adding: int):
 @envelope
 def import_roster_csv(csv_content: str):
 	return tenant_setup.import_roster_csv(csv_content)
+
+
+@frappe.whitelist()
+@envelope
+def search(query: str, doctype: str, limit: int = 20):
+	return search_module.search(query, doctype, limit)
+
+
+@frappe.whitelist()
+@envelope
+def get_searchable_sources():
+	return search_module.get_searchable_sources()
+
+
+@frappe.whitelist()
+@envelope
+def rebuild_search_index(doctype: str | None = None):
+	return search_module.rebuild_index(doctype)
