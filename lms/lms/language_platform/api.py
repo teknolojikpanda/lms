@@ -20,6 +20,7 @@ from lms.lms.doctype.lms_speaking_submission import lms_speaking_submission as s
 from lms.lms.doctype.lms_tenant import lms_tenant as tenant
 from lms.lms.doctype.lms_video_overlay import lms_video_overlay as overlay
 from lms.lms.language_platform import admin_api, tenant_setup
+from lms.lms.language_platform import dr as dr_module
 from lms.lms.language_platform import drm as drm_module
 from lms.lms.language_platform import search as search_module
 from lms.lms.language_platform import watermark as watermark_module
@@ -245,3 +246,21 @@ def get_watermark(lesson: str):
 @envelope
 def trace_watermark(code: str):
 	return watermark_module.trace_watermark(code)
+
+
+@frappe.whitelist()
+@envelope
+def get_dr_readiness():
+	return dr_module.get_dr_readiness()
+
+
+@frappe.whitelist()
+@envelope
+def record_restore_test(outcome: str, notes: str | None = None):
+	return dr_module.record_restore_test(outcome, notes)
+
+
+@frappe.whitelist()
+@envelope
+def record_dr_drill(notes: str | None = None):
+	return dr_module.record_dr_drill(notes)

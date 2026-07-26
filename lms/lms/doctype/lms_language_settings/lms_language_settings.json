@@ -41,7 +41,15 @@
   "watermark_opacity",
   "column_break_watermark",
   "watermark_move_interval_seconds",
-  "watermark_retention_days"
+  "watermark_retention_days",
+  "dr_section",
+  "dr_region",
+  "rpo_target_minutes",
+  "rto_target_hours",
+  "column_break_dr",
+  "restore_test_interval_days",
+  "last_restore_test_at",
+  "last_dr_drill_at"
  ],
  "fields": [
   {
@@ -288,6 +296,60 @@
    "fieldtype": "Int",
    "label": "Session Retention (days)",
    "non_negative": 1
+  },
+  {
+   "description": "Business continuity targets and evidence (§6.1, §8.18). The dates below are what makes the restore-test MUST auditable rather than assumed.",
+   "fieldname": "dr_section",
+   "fieldtype": "Section Break",
+   "label": "Disaster Recovery"
+  },
+  {
+   "description": "DR region, when cross-region replication is enabled (§8.1 suggests eu-west-1). Blank means single-region.",
+   "fieldname": "dr_region",
+   "fieldtype": "Data",
+   "label": "DR Region"
+  },
+  {
+   "default": "60",
+   "description": "§6.1 states 15 min - 1 hour. Backups older than this are reported as a breach.",
+   "fieldname": "rpo_target_minutes",
+   "fieldtype": "Int",
+   "label": "RPO Target (minutes)",
+   "non_negative": 1
+  },
+  {
+   "default": "4",
+   "description": "§6.1 states 1-4 hours. Used to build the failover phase budget.",
+   "fieldname": "rto_target_hours",
+   "fieldtype": "Int",
+   "label": "RTO Target (hours)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_dr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "30",
+   "description": "How often a backup must actually be restored and verified (§8.18 MUST).",
+   "fieldname": "restore_test_interval_days",
+   "fieldtype": "Int",
+   "label": "Restore Test Interval (days)",
+   "non_negative": 1
+  },
+  {
+   "description": "Set by record_restore_test, and only on a pass. A failed test deliberately leaves this untouched.",
+   "fieldname": "last_restore_test_at",
+   "fieldtype": "Datetime",
+   "label": "Last Successful Restore Test",
+   "read_only": 1
+  },
+  {
+   "description": "Set by record_dr_drill. §8.18 asks for at least one a year.",
+   "fieldname": "last_dr_drill_at",
+   "fieldtype": "Datetime",
+   "label": "Last DR Drill",
+   "read_only": 1
   }
  ],
  "issingle": 1,

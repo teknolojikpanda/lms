@@ -26,10 +26,12 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 4.9.3 | Speaking data privacy (retention, disclosure) | 🔨/🏗️ | Retention days + daily quota in module settings 🔨; S3 lifecycle 🏗️ |
 | 4.10 | FinOps / CUR dashboards | 🔨/🏗️ | Owner dashboard with application-metered cost estimate (Ek-6.3 unit prices, clearly labelled) 🔨; authoritative CUR+Athena feed 🏗️ |
 | 5.1 | Stack (changed by ADR) | 🔨 | `docs/adr/ADR-0001-stack-change-frappe-lms.md` |
+| 6.1 | Uptime, RPO/RTO | 🔨/🏗️ | Multi-AZ by default 🏗️; RPO/RTO measured rather than assumed — `dr_rules.py` evaluates backup freshness against the 15min–1hr target (a missing backup reports *unknown*, never healthy) and breaks the 4-hour RTO into a phase budget, surfaced by `get_dr_readiness` |
 | 6.3 | Accessibility: 6 font steps, whiteboard mode, WCAG AA | ⏭️ | frontend increment (CSS vars exist in frappe-ui theme) |
 | 6.4 | KVKK: retention, audit log, encryption | 🔨/🏗️ | `track_changes` on all new doctypes + override audit comments; Ek-2 retention purge jobs (audio 30d, transcripts 1y, exam results 2y — all configurable, 0 = keep forever) in `retention.py` 🔨; S3/KMS 🏗️ |
 | 7.3 | API error envelope + correlationId | 🔨 | `lms/lms/language_platform/envelope.py` decorator used by module APIs |
 | 8.x | AWS infra (VPC, ECS, CloudFront, S3, …) | 🔨 | **`dil-platformu-infra`** repo: 10 Terraform modules (network, data, compute, edge, media, ai, security, observability, finops, search) + bootstrap + dev/prod roots; `terraform validate` green. Remaining: MediaPackage DRM, DR replication |
+| 8.18 | Backup, DR, business continuity | 🔨 | `modules/dr`: S3 cross-region replication (content-vod, logs) to eu-west-1 with delete markers deliberately **not** replicated, AWS Backup hourly snapshots + cross-region copy, separate DR-region CMK. Pilot-light model. **Restore test (MUST) and annual drill are tracked, not assumed**: `record_restore_test` (a failed test does not reset the clock), `record_dr_drill` (notes mandatory), daily job logging lapses. Runbook: `dil-platformu-infra/docs/dr-runbook.md` |
 | 8.6 | Accounts, environments, Organizations (MUST) | 🔨 | `organization/` root: OU structure (Workloads/NonProduction+Production, Security, Sandbox), 5 guardrail SCPs (audit-service protection, S3 public block, KMS protection, region restriction, prod hardening incl. root-user denial), IAM Identity Center permission sets. **SCP enforcement off by default** with break-glass exemptions and a staged rollout procedure |
 | 8.10 | Search: MVP DB full-text → OpenSearch at scale | 🔨 | `search_rules.py` (policy: field whitelist, per-site index naming, access rules) + `search_providers.py` (Database default / OpenSearch) + `search.py` (RBAC-enforced API, incremental indexing, nightly reindex). Question **answer keys are never indexed**; transcript index entries are dropped by both retention and DSAR erasure. Infra: `modules/search` (disabled by default) |
 | 9.1 | Input validation, RBAC, rate limits | ✅/🔨 | Frappe schema validation + role perms; per-endpoint checks in new APIs; `rate_limit` on placement start/submit/autosave, speaking upload, overlay writes and all score overrides 🔨 |
@@ -59,8 +61,16 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 10. **DRM (done to the procurement boundary):** MediaPackage/SPEKE infra + licence proxy.
 11. **Watermarking (done):** session watermark shipped; forensic marking plumbed to the
     NexGuard procurement boundary.
-12. **Remaining — all require a running environment, a purchase, or both:**
-    run the load + soak suites against staging to record baseline numbers, real-time
-    HLS/ABR player soak, staged SCP enforcement (Sandbox → NonProd → Prod), DRM vendor
-    procurement + player EME integration, NexGuard licence + back-catalogue re-transcode,
-    and DR region replication.
+12. **DR (done):** pilot-light replication, RPO/RTO reporting, restore-test and drill tracking.
+
+**Every implementable clause of the agreement now has code behind it.** What remains
+cannot be completed from a development machine — it needs a running environment, a
+commercial purchase, or a scheduled operational exercise:
+
+- run the load + soak suites against staging to record baseline numbers (§6.2, §6.6)
+- real-time HLS/ABR player soak in a browser over hours (§6.6)
+- staged SCP enforcement: Sandbox → NonProduction → Production (§8.6)
+- DRM vendor procurement + player EME integration (§4.4.3, §1.2)
+- NexGuard licence + back-catalogue re-transcode (§4.4.3 Premium)
+- first DR drill and restore test (§8.18 — the tracking is built; the exercise is not)
+- accessibility pass: 6 font steps, whiteboard mode, WCAG 2.1 AA (§6.3)
