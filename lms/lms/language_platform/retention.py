@@ -98,7 +98,9 @@ def run_retention_jobs():
 	A failure in one purge must not stop the others, so each is wrapped:
 	losing today's transcript purge should never also skip exam results.
 	"""
-	for job in (purge_expired_transcripts, purge_expired_attempts):
+	from lms.lms.language_platform.watermark import purge_expired_watermark_sessions
+
+	for job in (purge_expired_transcripts, purge_expired_attempts, purge_expired_watermark_sessions):
 		try:
 			job()
 		except Exception:

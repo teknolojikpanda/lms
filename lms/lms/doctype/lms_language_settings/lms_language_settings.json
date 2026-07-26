@@ -34,7 +34,14 @@
   "drm_token_ttl_seconds",
   "column_break_drm",
   "drm_license_url",
-  "drm_license_token"
+  "drm_license_token",
+  "watermark_section",
+  "watermark_enabled",
+  "watermark_label_prefix",
+  "watermark_opacity",
+  "column_break_watermark",
+  "watermark_move_interval_seconds",
+  "watermark_retention_days"
  ],
  "fields": [
   {
@@ -231,6 +238,56 @@
    "fieldname": "drm_license_token",
    "fieldtype": "Password",
    "label": "Licence Server Token"
+  },
+  {
+   "description": "Draws a per-viewer code over the player so a screen recording traces back to whoever made it (§1.1 copying deterrence). Independent of DRM. True forensic (in-essence) watermarking is a Premium vendor option — see docs/watermarking.md.",
+   "fieldname": "watermark_section",
+   "fieldtype": "Section Break",
+   "label": "Session Watermark"
+  },
+  {
+   "default": "0",
+   "fieldname": "watermark_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Session Watermark"
+  },
+  {
+   "depends_on": "eval:doc.watermark_enabled",
+   "description": "Optional text before the code, e.g. the institution name. Never put personal data here — the overlay is visible to anyone watching the screen.",
+   "fieldname": "watermark_label_prefix",
+   "fieldtype": "Data",
+   "label": "Label Prefix"
+  },
+  {
+   "default": "35",
+   "depends_on": "eval:doc.watermark_enabled",
+   "description": "Percent. Too faint is unreadable in a recording; too strong makes the lesson unpleasant. Clamped to 15-80.",
+   "fieldname": "watermark_opacity",
+   "fieldtype": "Int",
+   "label": "Opacity (%)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_watermark",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "20",
+   "depends_on": "eval:doc.watermark_enabled",
+   "description": "How often the mark jumps position. A static mark is simply cropped out.",
+   "fieldname": "watermark_move_interval_seconds",
+   "fieldtype": "Int",
+   "label": "Move Interval (seconds)",
+   "non_negative": 1
+  },
+  {
+   "default": "180",
+   "depends_on": "eval:doc.watermark_enabled",
+   "description": "Sessions record IP and user agent, so they are personal data. 0 keeps them indefinitely.",
+   "fieldname": "watermark_retention_days",
+   "fieldtype": "Int",
+   "label": "Session Retention (days)",
+   "non_negative": 1
   }
  ],
  "issingle": 1,

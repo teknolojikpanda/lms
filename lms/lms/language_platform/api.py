@@ -22,6 +22,7 @@ from lms.lms.doctype.lms_video_overlay import lms_video_overlay as overlay
 from lms.lms.language_platform import admin_api, tenant_setup
 from lms.lms.language_platform import drm as drm_module
 from lms.lms.language_platform import search as search_module
+from lms.lms.language_platform import watermark as watermark_module
 from lms.lms.language_platform.envelope import envelope
 
 
@@ -232,3 +233,15 @@ def drm_license(playback_token: str, license_request: str):
 @envelope
 def get_drm_status():
 	return drm_module.get_drm_status()
+
+
+@frappe.whitelist()
+@envelope
+def get_watermark(lesson: str):
+	return watermark_module.get_watermark(lesson)
+
+
+@frappe.whitelist()
+@envelope
+def trace_watermark(code: str):
+	return watermark_module.trace_watermark(code)

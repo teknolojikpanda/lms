@@ -6,6 +6,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | § | Requirement | Status | Where |
 |---|---|---|---|
 | 1.1 | B2B multi-tenant, tenant isolation | 🔨 | Tenant = Frappe site (ADR-0001). `LMS Tenant` registry + lifecycle APIs (owner portal) and `provisioning/provision_tenant.py` CLI (create/suspend/resume/archive/purge). Privileged step deliberately kept off the request path. Offboarding separates reversible **Archived** from terminal **Purged** with a 90-day grace period and four guards (archived status, data export recorded, backup verified, grace elapsed) |
+| 1.1 | Copying deterrence ("kopyalama caydiricilik") | 🔨 | Session watermark: per-viewer opaque code drawn over the player on a moving schedule, `LMS Watermark Session` registry making a leaked recording traceable, moderator-only audited trace API, own retention window. Opaque code rather than the student's email so the overlay discloses no PII to bystanders (§6.4). See `docs/watermarking.md` |
 | 1.3 | Onboarding: 1 institution, 10 classes, 500 students in a day | 🔨 | CSV roster import (`tenant_setup.import_roster_csv`) creating students + classes with per-row error reporting and seat-limit enforcement; runbook in `docs/tenant-onboarding-runbook.md` |
 | 3.1 | 4-role hierarchy | ✅ | Role mapping in ADR-0001 (Moderator / Course Creator / Batch Evaluator / LMS Student) |
 | 3.2 | Separate portal URLs | ✅/⏭️ | SPA route groups per role; subdomain per tenant 🏗️ |
@@ -56,8 +57,10 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
    Identity Center permission sets.
 9. **Offboarding (done):** archive/restore/purge with grace period and guards.
 10. **DRM (done to the procurement boundary):** MediaPackage/SPEKE infra + licence proxy.
-11. **Remaining — all require a running environment, a purchase, or both:**
+11. **Watermarking (done):** session watermark shipped; forensic marking plumbed to the
+    NexGuard procurement boundary.
+12. **Remaining — all require a running environment, a purchase, or both:**
     run the load + soak suites against staging to record baseline numbers, real-time
     HLS/ABR player soak, staged SCP enforcement (Sandbox → NonProd → Prod), DRM vendor
-    procurement + player EME integration, forensic watermarking (Premium), and DR
-    region replication.
+    procurement + player EME integration, NexGuard licence + back-catalogue re-transcode,
+    and DR region replication.
