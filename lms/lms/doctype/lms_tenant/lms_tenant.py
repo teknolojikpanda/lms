@@ -19,12 +19,17 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.rate_limiter import rate_limit
-from frappe.utils import now_datetime
+from frappe.utils import get_datetime, now_datetime
 
 from lms.lms.language_platform.tenant_rules import (
+	DEFAULT_GRACE_DAYS,
+	PurgeNotAllowed,
 	TenantNameError,
 	build_site_name,
+	check_purge_preconditions,
 	check_seat_capacity,
+	purge_after_date,
+	purge_eligibility,
 	seats_available,
 	validate_subdomain,
 )
@@ -32,12 +37,19 @@ from lms.lms.language_platform.tenant_rules import (
 # Status transitions the platform allows. Anything not listed is refused,
 # so a tenant cannot jump from Requested straight to Active without the
 # provisioning step actually having run.
+#
+# Archived is deliberately *reversible*: offboarding decisions get undone
+# (a renewed contract, a resolved payment dispute, the wrong tenant
+# named), and the grace period exists precisely so that is possible.
+# Purged is the only terminal state, because it is the only one backed by
+# an irreversible action.
 ALLOWED_TRANSITIONS = {
 	"Requested": {"Provisioning", "Archived"},
 	"Provisioning": {"Active", "Requested", "Archived"},
 	"Active": {"Suspended", "Archived"},
 	"Suspended": {"Active", "Archived"},
-	"Archived": set(),
+	"Archived": {"Active", "Purged"},
+	"Purged": set(),
 }
 
 
@@ -204,6 +216,133 @@ def check_tenant_capacity(tenant: str, adding: int) -> dict:
 	except ValueError as e:
 		frappe.throw(str(e), title=_("Seat Limit"))
 	return {"ok": True, "seats_available": seats_available(doc.seat_limit, doc.active_students)}
+
+
+@frappe.whitelist()
+@rate_limit(limit=30, seconds=60 * 60)
+def archive_tenant(tenant: str, reason: str, grace_days: int = DEFAULT_GRACE_DAYS) -> dict:
+	"""Begin offboarding: the site goes offline but stays recoverable.
+
+	This does not delete anything. It records the decision, starts the
+	grace clock and tells the operator what to run next; the CLI takes
+	the backup and puts the site into maintenance mode.
+	"""
+	_require_owner()
+	if not (reason or "").strip():
+		frappe.throw(_("An archival reason is mandatory."))
+
+	doc = frappe.get_doc("LMS Tenant", tenant)
+	archived_at = now_datetime()
+
+	doc.archived_at = archived_at
+	doc.archival_reason = reason.strip()
+	doc.purge_after = purge_after_date(archived_at, grace_days).date()
+	doc.transition_to("Archived", reason.strip())
+
+	return {
+		"name": doc.name,
+		"status": doc.status,
+		"purge_after": str(doc.purge_after),
+		"next_step": _(
+			"Run the archival CLI on the bench host to back up and take the site offline: "
+			"python provisioning/provision_tenant.py --action archive --subdomain {0}"
+		).format(doc.subdomain),
+	}
+
+
+@frappe.whitelist()
+@rate_limit(limit=30, seconds=60 * 60)
+def restore_tenant(tenant: str) -> dict:
+	"""Undo an archival during the grace period."""
+	_require_owner()
+
+	doc = frappe.get_doc("LMS Tenant", tenant)
+	if doc.status != "Archived":
+		frappe.throw(_("Only archived tenants can be restored."))
+
+	doc.archived_at = None
+	doc.purge_after = None
+	doc.transition_to("Active")
+
+	return {
+		"name": doc.name,
+		"status": doc.status,
+		"next_step": _(
+			"Bring the site back online: python provisioning/provision_tenant.py "
+			"--action resume --subdomain {0}"
+		).format(doc.subdomain),
+	}
+
+
+@frappe.whitelist()
+def get_purge_readiness(tenant: str) -> dict:
+	"""Report whether a tenant may be purged, and what is still missing.
+
+	Read-only, so the owner portal can show the state of every guard
+	rather than only discovering them one refusal at a time.
+	"""
+	_require_owner()
+	doc = frappe.get_doc("LMS Tenant", tenant)
+
+	eligibility = purge_eligibility(
+		get_datetime(doc.archived_at) if doc.archived_at else None,
+		DEFAULT_GRACE_DAYS,
+	)
+
+	blockers = []
+	if doc.status != "Archived":
+		blockers.append(_("Tenant is '{0}', not archived.").format(doc.status))
+	if not doc.export_location:
+		blockers.append(_("No data export recorded."))
+	if not doc.backup_verified:
+		blockers.append(_("Backup not verified."))
+	if not eligibility["eligible"] and doc.status == "Archived":
+		blockers.append(eligibility["reason"])
+
+	return {
+		"name": doc.name,
+		"status": doc.status,
+		"ready": not blockers,
+		"blockers": blockers,
+		"days_remaining": eligibility.get("days_remaining"),
+		"export_location": doc.export_location,
+		"backup_verified": bool(doc.backup_verified),
+	}
+
+
+def record_archival_artifacts(subdomain: str, export_location: str, backup_verified: bool = True):
+	"""Called by the archival CLI once the backup exists and was checked."""
+	doc = frappe.get_doc("LMS Tenant", subdomain)
+	doc.export_location = export_location
+	doc.backup_verified = 1 if backup_verified else 0
+	doc.save(ignore_permissions=True)
+	doc.add_comment(
+		"Comment", _("Data export recorded at {0}; backup verified.").format(export_location)
+	)
+
+
+def mark_purged(subdomain: str, notes: str | None = None):
+	"""Called by the purge CLI after the site has been destroyed.
+
+	Re-checks every precondition rather than trusting the caller: this
+	function is what makes the registry claim a site is gone, and a
+	mistaken claim is as damaging as a mistaken deletion.
+	"""
+	doc = frappe.get_doc("LMS Tenant", subdomain)
+
+	try:
+		check_purge_preconditions(
+			status=doc.status,
+			archived_at=get_datetime(doc.archived_at) if doc.archived_at else None,
+			backup_verified=bool(doc.backup_verified),
+			export_location=doc.export_location,
+		)
+	except PurgeNotAllowed as e:
+		frappe.throw(str(e), title=_("Purge Refused"))
+
+	doc.purged_at = now_datetime()
+	doc.provisioning_notes = notes
+	doc.transition_to("Purged", notes)
 
 
 def mark_provisioning(subdomain: str, notes: str | None = None):

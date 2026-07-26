@@ -136,12 +136,113 @@ The lifecycle refuses invalid jumps: a tenant cannot go from Requested
 straight to Active without provisioning having run, and Archived is
 terminal.
 
+## Offboarding
+
+Offboarding separates two things that are usually conflated:
+
+- **Archived** — the site is backed up and offline, and can be brought
+  back. Reversible.
+- **Purged** — the site is gone. The only route back is restoring a
+  backup into a fresh site, which is a different job with a different
+  runbook.
+
+Between them sits a **90-day grace period**, because offboarding
+decisions get reversed: contracts get renewed, payment disputes get
+resolved, and occasionally the wrong tenant gets named. Deleting on the
+day of the request removes the chance to notice.
+
+### 1. Archive (reversible)
+
+```
+POST /api/method/lms.lms.language_platform.api.archive_tenant
+{ "tenant_name": "ankara-koleji", "reason": "Contract ended 2026-07-31" }
+```
+
+Then, on the bench host:
+
+```bash
+python apps/lms/provisioning/provision_tenant.py \
+    --action archive --subdomain ankara-koleji \
+    --base-domain dilplatformu.com \
+    --control-site app.dilplatformu.com \
+    --export-location s3://exports/ankara-koleji-2026-07-31.tar.gz
+```
+
+The CLI backs up first and takes the site offline second, so a failed
+backup leaves a running tenant rather than an unreachable one with no
+recent copy. It then verifies the artefacts actually exist and are
+non-empty — `bench backup` reporting success is not the same as a usable
+dump, and this is the last point anyone would notice before the data is
+destroyed.
+
+### 2. Return the data
+
+**Do this before any purge.** The institution's data is theirs; the
+export is what makes deletion defensible rather than merely convenient.
+Record where it was delivered — the registry refuses a purge without it.
+
+### 3. Restore, if the decision changes
+
+```
+POST /api/method/lms.lms.language_platform.api.restore_tenant
+{ "tenant_name": "ankara-koleji" }
+```
+
+```bash
+python apps/lms/provisioning/provision_tenant.py \
+    --action resume --subdomain ankara-koleji --base-domain dilplatformu.com
+```
+
+### 4. Purge (irreversible)
+
+Check what is still outstanding first:
+
+```
+POST /api/method/lms.lms.language_platform.api.get_purge_readiness
+{ "tenant_name": "ankara-koleji" }
+```
+
+It returns every unmet guard at once rather than making you discover
+them one refusal at a time. All four must hold:
+
+| Guard | Why |
+|---|---|
+| Status is Archived | you cannot delete a live tenant by accident |
+| Data export recorded | the institution's data was returned first |
+| Backup verified | deletion without a checked backup is unrecoverable |
+| Grace period elapsed | the decision has had time to be reversed |
+
+Then:
+
+```bash
+python apps/lms/provisioning/provision_tenant.py \
+    --action purge --subdomain ankara-koleji \
+    --base-domain dilplatformu.com \
+    --control-site app.dilplatformu.com \
+    --confirm ankara-koleji \
+    --yes-i-am-sure
+```
+
+`--confirm` requires typing the subdomain exactly. That is not
+authentication — you already authenticated — it is there to interrupt
+autopilot, so whoever runs it has read which tenant they are about to
+destroy. `--control-site` is mandatory: the guards live in the registry,
+and the CLI must not be the only thing between an operator and a deleted
+institution. The registry re-checks all four preconditions when
+recording the purge, so a site dropped out of process still cannot be
+recorded as a clean offboarding.
+
+Keep the archived backup for the contractual and statutory retention
+period after purging. Purging the site does not discharge the obligation
+to hold records you are still required to hold.
+
 ## Not automated yet
 
-- **Archival/offboarding**: `bench drop-site` plus data export is
-  deliberately manual — it is destructive and irreversible.
 - **Seat sync**: `active_students` on the registry is updated by the
   provisioning tooling, not live from each tenant site. Treat it as
   indicative between syncs.
+- **Backup lifecycle after purge**: archived backups are retained
+  wherever the bench writes them; moving them to the exports bucket with
+  an S3 lifecycle rule is an infra-repo job.
 - **Per-tenant AWS resources** (dedicated buckets, custom domains) are
   Enterprise-package work and are provisioned from the infra repo.

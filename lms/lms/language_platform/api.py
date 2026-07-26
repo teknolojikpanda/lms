@@ -174,6 +174,24 @@ def check_tenant_capacity(tenant_name: str, adding: int):
 
 @frappe.whitelist()
 @envelope
+def archive_tenant(tenant_name: str, reason: str, grace_days: int = 90):
+	return tenant.archive_tenant(tenant_name, reason, grace_days)
+
+
+@frappe.whitelist()
+@envelope
+def restore_tenant(tenant_name: str):
+	return tenant.restore_tenant(tenant_name)
+
+
+@frappe.whitelist()
+@envelope
+def get_purge_readiness(tenant_name: str):
+	return tenant.get_purge_readiness(tenant_name)
+
+
+@frappe.whitelist()
+@envelope
 def import_roster_csv(csv_content: str):
 	return tenant_setup.import_roster_csv(csv_content)
 

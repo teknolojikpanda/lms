@@ -5,7 +5,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 
 | § | Requirement | Status | Where |
 |---|---|---|---|
-| 1.1 | B2B multi-tenant, tenant isolation | 🔨 | Tenant = Frappe site (ADR-0001). `LMS Tenant` registry + lifecycle APIs (owner portal) and `provisioning/provision_tenant.py` CLI (site create/suspend/resume). Privileged step deliberately kept off the request path |
+| 1.1 | B2B multi-tenant, tenant isolation | 🔨 | Tenant = Frappe site (ADR-0001). `LMS Tenant` registry + lifecycle APIs (owner portal) and `provisioning/provision_tenant.py` CLI (create/suspend/resume/archive/purge). Privileged step deliberately kept off the request path. Offboarding separates reversible **Archived** from terminal **Purged** with a 90-day grace period and four guards (archived status, data export recorded, backup verified, grace elapsed) |
 | 1.3 | Onboarding: 1 institution, 10 classes, 500 students in a day | 🔨 | CSV roster import (`tenant_setup.import_roster_csv`) creating students + classes with per-row error reporting and seat-limit enforcement; runbook in `docs/tenant-onboarding-runbook.md` |
 | 3.1 | 4-role hierarchy | ✅ | Role mapping in ADR-0001 (Moderator / Course Creator / Batch Evaluator / LMS Student) |
 | 3.2 | Separate portal URLs | ✅/⏭️ | SPA route groups per role; subdomain per tenant 🏗️ |
@@ -54,6 +54,8 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 7. **Search (done):** provider split with the OpenSearch path behind a setting.
 8. **Organizations (done):** OUs, guardrail SCPs (unenforced pending staged rollout),
    Identity Center permission sets.
-9. **Remaining:** run the load + soak suites against staging to record baseline numbers,
-   real-time HLS/ABR player soak, staged SCP enforcement, tenant archival/offboarding
-   automation, MediaPackage DRM and DR replication (both Enterprise-package options).
+9. **Offboarding (done):** archive/restore/purge with grace period and guards.
+10. **Remaining — all require a running environment or are Enterprise options:**
+    run the load + soak suites against staging to record baseline numbers, real-time
+    HLS/ABR player soak, staged SCP enforcement (Sandbox → NonProd → Prod), and the
+    Enterprise-package items MediaPackage DRM and DR region replication.
