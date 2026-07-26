@@ -28,7 +28,8 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 6.3 | Accessibility: 6 font steps, whiteboard mode, WCAG AA | ⏭️ | frontend increment (CSS vars exist in frappe-ui theme) |
 | 6.4 | KVKK: retention, audit log, encryption | 🔨/🏗️ | `track_changes` on all new doctypes + override audit comments; Ek-2 retention purge jobs (audio 30d, transcripts 1y, exam results 2y — all configurable, 0 = keep forever) in `retention.py` 🔨; S3/KMS 🏗️ |
 | 7.3 | API error envelope + correlationId | 🔨 | `lms/lms/language_platform/envelope.py` decorator used by module APIs |
-| 8.x | AWS infra (VPC, ECS, CloudFront, S3, …) | 🔨 | **`dil-platformu-infra`** repo: 10 Terraform modules (network, data, compute, edge, media, ai, security, observability, finops, search) + bootstrap + dev/prod roots; `terraform validate` green. Remaining: AWS Organizations/SCP (§8.6), MediaPackage DRM, DR replication |
+| 8.x | AWS infra (VPC, ECS, CloudFront, S3, …) | 🔨 | **`dil-platformu-infra`** repo: 10 Terraform modules (network, data, compute, edge, media, ai, security, observability, finops, search) + bootstrap + dev/prod roots; `terraform validate` green. Remaining: MediaPackage DRM, DR replication |
+| 8.6 | Accounts, environments, Organizations (MUST) | 🔨 | `organization/` root: OU structure (Workloads/NonProduction+Production, Security, Sandbox), 5 guardrail SCPs (audit-service protection, S3 public block, KMS protection, region restriction, prod hardening incl. root-user denial), IAM Identity Center permission sets. **SCP enforcement off by default** with break-glass exemptions and a staged rollout procedure |
 | 8.10 | Search: MVP DB full-text → OpenSearch at scale | 🔨 | `search_rules.py` (policy: field whitelist, per-site index naming, access rules) + `search_providers.py` (Database default / OpenSearch) + `search.py` (RBAC-enforced API, incremental indexing, nightly reindex). Question **answer keys are never indexed**; transcript index entries are dropped by both retention and DSAR erasure. Infra: `modules/search` (disabled by default) |
 | 9.1 | Input validation, RBAC, rate limits | ✅/🔨 | Frappe schema validation + role perms; per-endpoint checks in new APIs; `rate_limit` on placement start/submit/autosave, speaking upload, overlay writes and all score overrides 🔨 |
 | 9.2 | KVKK technical rights (DSAR) | 🔨 | `LMS Data Request` (Export/Erasure, Pending→Approved→Completed, four-eyes gate: erasure cannot be self-approved) + `dsar.py` / `privacy_rules.py`. Export = full JSON of everything stored about the person; erasure = anonymise (academic records kept pseudonymously per "zorunlu saklama", personal free text deleted, speaking audio destroyed immediately). Self-service export for students. **Residual flagged for legal review:** the login identifier persists in `owner`/`modified_by` columns — documented in `dsar._scrub_user_record` |
@@ -51,6 +52,8 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 5. **Load tests (done):** k6 suite in `load-tests/` with §6.2 thresholds as pass/fail gates.
 6. **Provisioning (done):** tenant registry, provisioning CLI, roster import, runbook.
 7. **Search (done):** provider split with the OpenSearch path behind a setting.
-8. **Remaining:** run the load + soak suites against staging to record baseline numbers,
-   real-time HLS/ABR player soak, AWS Organizations/SCP (§8.6), tenant
-   archival/offboarding automation.
+8. **Organizations (done):** OUs, guardrail SCPs (unenforced pending staged rollout),
+   Identity Center permission sets.
+9. **Remaining:** run the load + soak suites against staging to record baseline numbers,
+   real-time HLS/ABR player soak, staged SCP enforcement, tenant archival/offboarding
+   automation, MediaPackage DRM and DR replication (both Enterprise-package options).
