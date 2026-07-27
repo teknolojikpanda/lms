@@ -51,11 +51,15 @@ echo "==> Installing lms from the mounted repo, branch ${BRANCH}"
 git config --global --add safe.directory "${SRC}"
 git config --global --add safe.directory "${SRC}/.git"
 
-# Cloning from the mount rather than GitHub is the whole point of this
-# compose file. The source is read-only, so this copies rather than links.
-git clone --branch "${BRANCH}" "${SRC}" "${BENCH_DIR}/apps/lms"
-bench pip install -e "${BENCH_DIR}/apps/lms"
-echo "lms" >> "${BENCH_DIR}/sites/apps.txt"
+# `bench get-app` against a local path is what makes this install the
+# mounted repo rather than GitHub. Let it own the clone, the editable
+# install, the asset build and sites/apps.txt.
+#
+# Do NOT hand-roll this with `git clone` + `echo >> apps.txt`: bench
+# writes app names without a trailing newline, so appending produces
+# "paymentslms" on one line and the site then fails to create with
+# ModuleNotFoundError.
+bench get-app --branch "${BRANCH}" "${SRC}"
 
 echo "==> Creating site ${SITE}"
 bench new-site "${SITE}" \
