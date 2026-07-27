@@ -128,20 +128,39 @@ def _placement_distribution() -> list[dict]:
 def _risky_students() -> list[dict]:
 	"""§4.8 heuristic: low recent activity + low quiz scores."""
 	cutoff = add_days(now_datetime(), -RISKY_INACTIVE_DAYS)
+
+	# The aggregates are computed in correlated subqueries and filtered in
+	# an outer WHERE rather than a HAVING over joined tables. Two reasons,
+	# both found by running this against MariaDB:
+	#
+	#   * MariaDB rejects a column alias that refers to a group function
+	#     inside HAVING (error 1247), so `HAVING avg_score < ...` fails.
+	#   * Joining progress AND quiz rows in one query multiplies them into
+	#     a cartesian product per member — wasted work that grows with a
+	#     student's history.
 	rows = frappe.db.sql(
 		"""
-		SELECT e.member,
-			u.full_name,
-			MAX(p.creation) AS last_activity,
-			AVG(q.percentage) AS avg_score
-		FROM `tabLMS Enrollment` e
-		JOIN `tabUser` u ON u.name = e.member AND u.enabled = 1
-		LEFT JOIN `tabLMS Course Progress` p ON p.member = e.member
-		LEFT JOIN `tabLMS Quiz Submission` q ON q.member = e.member
-		GROUP BY e.member, u.full_name
-		HAVING (last_activity IS NULL OR last_activity < %s)
-			OR (avg_score IS NOT NULL AND avg_score < %s)
-		ORDER BY COALESCE(avg_score, 0) ASC, last_activity ASC
+		SELECT * FROM (
+			SELECT
+				e.member,
+				u.full_name,
+				(
+					SELECT MAX(p.creation)
+					FROM `tabLMS Course Progress` p
+					WHERE p.member = e.member
+				) AS last_activity,
+				(
+					SELECT AVG(q.percentage)
+					FROM `tabLMS Quiz Submission` q
+					WHERE q.member = e.member
+				) AS avg_score
+			FROM `tabLMS Enrollment` e
+			JOIN `tabUser` u ON u.name = e.member AND u.enabled = 1
+			GROUP BY e.member, u.full_name
+		) AS student
+		WHERE (student.last_activity IS NULL OR student.last_activity < %s)
+			OR (student.avg_score IS NOT NULL AND student.avg_score < %s)
+		ORDER BY COALESCE(student.avg_score, 0) ASC, student.last_activity ASC
 		LIMIT 10
 		""",
 		(cutoff, RISKY_SCORE_THRESHOLD),

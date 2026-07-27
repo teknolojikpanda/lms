@@ -76,6 +76,7 @@ def run():
 	_accessibility()
 	_search()
 	_watermark()
+	_dashboards()
 	_tenants()
 	_dsar()
 	_dr()
@@ -747,6 +748,52 @@ def _watermark():
 		except frappe.ValidationError:
 			return "invalid code refused"
 		raise AssertionError("invalid code accepted")
+
+
+# --- dashboards -------------------------------------------------------------------------
+#
+# These run raw SQL, which unit tests cannot exercise: the first time the
+# institution dashboard met MariaDB it failed with error 1247 (a HAVING
+# clause referencing an aggregate alias). Anything issuing hand-written
+# SQL needs a check that actually executes it.
+
+
+def _dashboards():
+	print("[dashboards]")
+
+	@check("institution dashboard query runs against MariaDB")
+	def _():
+		from lms.lms.language_platform.admin_api import get_admin_dashboard
+
+		data = get_admin_dashboard()
+		for key in ("kpis", "placement_distribution", "activity", "risky_students", "pending_grading"):
+			if key not in data:
+				raise AssertionError(f"missing section: {key}")
+		return (
+			f"{data['kpis']['active_students']} students, "
+			f"{len(data['risky_students'])} at risk, "
+			f"{len(data['activity']['lesson_progress'])}-day activity series"
+		)
+
+	@check("owner dashboard query runs against MariaDB")
+	def _():
+		from lms.lms.language_platform.admin_api import get_owner_dashboard
+
+		data = get_owner_dashboard()
+		for key in ("kpis", "trends", "ops", "cost_estimate"):
+			if key not in data:
+				raise AssertionError(f"missing section: {key}")
+		return (
+			f"{data['kpis']['total_users']} users, "
+			f"cost estimate ${data['cost_estimate']['total_usd']}"
+		)
+
+	@check("DR readiness query runs")
+	def _():
+		from lms.lms.language_platform.dr import get_dr_readiness
+
+		data = get_dr_readiness()
+		return f"status={data['status']}, {len(data['rto_plan'])} RTO phases"
 
 
 # --- tenants --------------------------------------------------------------------------
