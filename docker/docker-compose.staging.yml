@@ -1,0 +1,77 @@
+# Staging bench for validating THIS working tree.
+#
+# The regular docker-compose.yml runs `bench get-app lms`, which fetches
+# from GitHub — useful for trying the product, useless for verifying local
+# changes. This one installs the app from the mounted repository instead,
+# so what runs is what is committed here.
+#
+#   docker compose -f docker-compose.staging.yml up -d
+#   docker compose -f docker-compose.staging.yml logs -f frappe
+#
+# The bench lives in a named volume so a restart does not re-download
+# frappe, node modules and the rest of a first-run bench init.
+name: lms-staging
+
+services:
+  mariadb:
+    image: mariadb:10.8
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+      - --skip-innodb-read-only-compressed
+    environment:
+      MYSQL_ROOT_PASSWORD: 123
+    volumes:
+      - mariadb-staging:/var/lib/mysql
+    healthcheck:
+      # bench new-site fails confusingly if MariaDB is merely listening but
+      # not ready, so gate the app on a real connection.
+      #
+      # An explicit credentialed ping rather than healthcheck.sh: that
+      # script authenticates without a password (as root, or as the mysql
+      # unix user under --su-mysql), and neither works here because
+      # MYSQL_ROOT_PASSWORD is set and the mysql user has no socket grant.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p123", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  frappe:
+    image: frappe/bench:latest
+    command: bash /workspace/lms-src/docker/init-staging.sh
+    environment:
+      - SHELL=/bin/bash
+      # Branch to install from the mounted repo.
+      - LMS_BRANCH=feature/language-platform-mvp
+    working_dir: /home/frappe
+    volumes:
+      # Read-only: the bench copies the app out of here, and nothing in
+      # the container should be able to modify the source of truth.
+      - ../:/workspace/lms-src:ro
+      # Deliberately NO volume over /home/frappe/frappe-bench. `bench init`
+      # refuses to write into a directory that already exists, which a
+      # mounted volume always does, and initialising elsewhere then moving
+      # it breaks the virtualenv (its shebangs carry absolute paths).
+      # The bench therefore lives in the container layer: `down` loses it
+      # and re-runs init, while site data persists in the mariadb volume.
+    ports:
+      - "8000:8000"
+      - "9000:9000"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mariadb-staging:

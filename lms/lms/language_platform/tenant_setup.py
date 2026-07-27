@@ -82,6 +82,47 @@ def create_institution_admin(email: str, full_name: str | None = None) -> str:
 # --- Roster import ------------------------------------------------------------
 
 
+def _create_class(class_name: str) -> str:
+	"""Create an LMS Batch for a class named in the roster.
+
+	LMS Batch makes nine fields mandatory — including an instructor, an
+	end date and a schedule — none of which a student roster carries.
+	Rather than fail the import (which is what happened before this was
+	exercised against a real site), fill defensible placeholders and let
+	the admin correct them: an imported class with a provisional timetable
+	is useful, an import that rejects every row because the CSV has no
+	lesson times is not.
+
+	The class is left **unpublished** so nothing reaches students until a
+	human has reviewed those placeholders.
+	"""
+	today = frappe.utils.nowdate()
+	placeholder = _("Imported from roster. Review schedule and instructor before publishing.")
+
+	batch = frappe.get_doc(
+		{
+			"doctype": "LMS Batch",
+			"title": class_name,
+			"published": 0,
+			"start_date": today,
+			# A term-length default; the admin sets the real end date.
+			"end_date": frappe.utils.add_days(today, 180),
+			"start_time": "09:00:00",
+			"end_time": "10:00:00",
+			"timezone": frappe.db.get_single_value("System Settings", "time_zone") or "UTC",
+			"description": placeholder,
+			"batch_details": placeholder,
+			# `instructors` is mandatory, and the roster does not name one.
+			# Seeding the importing admin keeps the record valid and
+			# visible to whoever created it, rather than inventing a
+			# teacher who has not agreed to take the class.
+			"instructors": [{"instructor": frappe.session.user}],
+		}
+	)
+	batch.insert(ignore_permissions=True)
+	return batch.name
+
+
 def _import_row(row: dict, batch_cache: dict) -> str:
 	"""Create (or reuse) one student and attach them to their class."""
 	email = row["email"]
@@ -108,16 +149,7 @@ def _import_row(row: dict, batch_cache: dict) -> str:
 		if not batch:
 			batch = frappe.db.get_value("LMS Batch", {"title": class_name}, "name")
 			if not batch:
-				batch_doc = frappe.get_doc(
-					{
-						"doctype": "LMS Batch",
-						"title": class_name,
-						"published": 0,
-						"start_date": frappe.utils.nowdate(),
-					}
-				)
-				batch_doc.insert(ignore_permissions=True)
-				batch = batch_doc.name
+				batch = _create_class(class_name)
 			batch_cache[class_name] = batch
 
 		if not frappe.db.exists("LMS Batch Enrollment", {"batch": batch, "member": user.name}):
