@@ -67,6 +67,7 @@ def run():
 	STATE.clear()
 	_reset_state()
 
+	_offline()
 	_doctypes()
 	_settings()
 	_placement()
@@ -88,6 +89,60 @@ def run():
 			if r["status"] == "FAIL":
 				print(f"  - {r['check']}: {r['detail']}")
 	return {"passed": passed, "failed": failed, "results": RESULTS}
+
+
+# --- offline ---------------------------------------------------------------------
+
+
+def _offline():
+	"""The platform must run with no AWS account and no outbound network.
+
+	Every AWS-backed feature is opt-in, and these checks exist so a future
+	change cannot quietly flip a default and make a working offline
+	install start reaching for credentials it does not have.
+	"""
+	print("[offline]")
+
+	@check("no AWS provider is selected by default")
+	def _():
+		settings = frappe.get_single("LMS Language Settings")
+		active = {
+			"speaking_provider": settings.speaking_provider or "Mock",
+			"search_provider": settings.search_provider or "Database",
+			"drm_enabled": bool(settings.drm_enabled),
+			"watermark_enabled": bool(settings.watermark_enabled),
+		}
+		if active["speaking_provider"] != "Mock":
+			raise AssertionError(f"speaking provider is {active['speaking_provider']}, not Mock")
+		if active["search_provider"] != "Database":
+			raise AssertionError(f"search provider is {active['search_provider']}, not Database")
+		if active["drm_enabled"]:
+			raise AssertionError("DRM is enabled; it requires a vendor licence server")
+		return "speaking=Mock, search=Database, drm=off"
+
+	@check("no AWS SDK is imported at module scope")
+	def _():
+		# boto3 is an optional dependency. If any module imported it at
+		# import time, the app would fail to load without it installed.
+		import sys
+
+		for module in ("boto3", "botocore", "opensearchpy"):
+			if module in sys.modules:
+				raise AssertionError(f"{module} was imported during app load")
+		return "boto3/opensearch-py not loaded"
+
+	@check("providers resolve to the offline implementations")
+	def _():
+		from lms.lms.language_platform.search_providers import get_provider as search_provider
+		from lms.lms.language_platform.speaking_providers import get_provider as speaking_provider
+
+		speaking = speaking_provider()
+		search = search_provider()
+		if type(speaking).__name__ != "MockProvider":
+			raise AssertionError(f"speaking resolved to {type(speaking).__name__}")
+		if type(search).__name__ != "DatabaseSearchProvider":
+			raise AssertionError(f"search resolved to {type(search).__name__}")
+		return f"{type(speaking).__name__} + {type(search).__name__}"
 
 
 # --- schema -------------------------------------------------------------------
