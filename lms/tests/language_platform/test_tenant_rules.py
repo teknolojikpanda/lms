@@ -23,6 +23,7 @@ from lms.lms.language_platform.tenant_rules import (
 	check_purge_preconditions,
 	check_seat_capacity,
 	normalize_roster_row,
+	ROSTER_SOURCE_ROW,
 	parse_roster,
 	purge_after_date,
 	purge_eligibility,
@@ -186,6 +187,33 @@ class TestRosterParsing(unittest.TestCase):
 			[{"email": "a@b.com", "first_name": "Ada"}, {"email": "bad", "first_name": "Bob"}]
 		)
 		self.assertEqual(errors[0]["row"], 2)
+
+	def test_valid_rows_carry_their_source_position(self):
+		"""Survivors must remember where they came from.
+
+		Filtering the rejects out shifts everything after them, so a caller
+		that later fails on row 4 of the file would otherwise report it as
+		row 2 — a line that is already in `errors` for another reason.
+		"""
+		valid, _ = parse_roster(
+			[
+				{"email": "a@b.com", "first_name": "Ada"},  # 1 valid
+				{"email": "bad", "first_name": "Bob"},  # 2 rejected
+				{"email": "nope", "first_name": "Cem"},  # 3 rejected
+				{"email": "d@e.com", "first_name": "Dev"},  # 4 valid
+			]
+		)
+		self.assertEqual([r[ROSTER_SOURCE_ROW] for r in valid], [1, 4])
+
+	def test_an_uploaded_column_cannot_displace_the_source_position(self):
+		"""The key is reserved; a spreadsheet column of that name loses."""
+		valid, _ = parse_roster(
+			[
+				{"email": "bad", "first_name": "Bob"},
+				{"email": "a@b.com", "first_name": "Ada", "Source Row": "999"},
+			]
+		)
+		self.assertEqual(valid[0][ROSTER_SOURCE_ROW], 2)
 
 	def test_duplicate_emails_are_rejected_not_deduplicated(self):
 		# Two rows with one address usually means two people were conflated;

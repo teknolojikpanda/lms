@@ -18,7 +18,7 @@ import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
 
-from lms.lms.language_platform.tenant_rules import parse_roster
+from lms.lms.language_platform.tenant_rules import ROSTER_SOURCE_ROW, parse_roster
 from lms.lms.utils import has_moderator_role
 
 # Commit every N users so a large import neither holds one enormous
@@ -177,16 +177,22 @@ def import_roster_rows(rows: list[dict]) -> dict:
 	imported = []
 	batch_cache: dict[str, str] = {}
 
-	for index, row in enumerate(valid, start=1):
-		savepoint = f"roster_{index}"
+	for position, row in enumerate(valid, start=1):
+		# Report the row's position in the *uploaded file*, not among the
+		# survivors. Once parse_roster drops the rejected rows the two
+		# diverge, and counting survivors would point an admin at the
+		# wrong spreadsheet line — often one already listed in `errors`
+		# for an unrelated reason.
+		source_row = row.get(ROSTER_SOURCE_ROW, position)
+		savepoint = f"roster_{position}"
 		try:
 			frappe.db.savepoint(savepoint)
 			imported.append(_import_row(row, batch_cache))
 		except Exception as e:
 			frappe.db.rollback(save_point=savepoint)
-			errors.append({"row": index, "email": row.get("email"), "errors": [str(e)]})
+			errors.append({"row": source_row, "email": row.get("email"), "errors": [str(e)]})
 
-		if index % IMPORT_BATCH_SIZE == 0:
+		if position % IMPORT_BATCH_SIZE == 0:
 			frappe.db.commit()
 
 	frappe.db.commit()
