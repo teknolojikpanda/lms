@@ -152,6 +152,13 @@ scheduler_events = {
 	"all": [
 		"lms.sqlite.build_index_in_background",
 	],
+	"cron": {
+		# Every minute, because the first speaking retry waits 60 seconds
+		# and a coarser tick would round the shortest backoff up to itself.
+		"* * * * *": [
+			"lms.lms.language_platform.speaking_pipeline.dispatch_due_retries",
+		],
+	},
 	"hourly": [
 		"lms.lms.doctype.lms_certificate_request.lms_certificate_request.schedule_evals",
 		"lms.lms.doctype.lms_course.lms_course.update_course_statistics",

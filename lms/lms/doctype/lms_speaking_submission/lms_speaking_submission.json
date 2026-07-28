@@ -11,6 +11,7 @@
   "audio_file",
   "duration_seconds",
   "retry_count",
+  "retry_after",
   "error_message",
   "section_break_transcript",
   "transcript",
@@ -83,6 +84,14 @@
    "hidden": 1,
    "label": "Retry Count",
    "read_only": 1
+  },
+  {
+   "description": "Earliest moment this submission may be retried. The backoff has to survive the worker that scheduled it, so it lives on the row rather than in a job's delay.",
+   "fieldname": "retry_after",
+   "fieldtype": "Datetime",
+   "label": "Retry After",
+   "read_only": 1,
+   "search_index": 1
   },
   {
    "depends_on": "eval:doc.status == 'Failed'",

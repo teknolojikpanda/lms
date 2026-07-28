@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import add_to_date, now_datetime
+from frappe.utils import add_to_date, get_datetime, now_datetime
 
 from lms.lms.language_platform import speaking_pipeline
 from lms.lms.language_platform.speaking_pipeline import (
@@ -10,8 +10,10 @@ from lms.lms.language_platform.speaking_pipeline import (
 	MAX_RETRIES,
 	_claim,
 	_handle_failure,
+	dispatch_due_retries,
 	process_submission,
 	requeue_stale_submissions,
+	retry_delay,
 )
 
 
@@ -123,14 +125,93 @@ class TestSpeakingPipelineFailure(IntegrationTestCase):
 	def test_retries_before_giving_up(self):
 		name = self._submission(status="Transcribing", retry_count=0)
 		self.enqueue.reset_mock()
+		before = now_datetime()
 		_handle_failure(name, RuntimeError("transient"))
 
 		row = self._row(name)
 		self.assertEqual(row.status, "Queued", "a retryable failure must return to the claimable state")
 		self.assertEqual(row.retry_count, 1)
 
-		self.assertEqual(self.enqueue.call_count, 1, "the retry must actually be scheduled")
-		self.assertEqual(self.enqueue.call_args.kwargs["submission_name"], name)
+		# The backoff is recorded, not slept through and not enqueued now.
+		self.assertEqual(
+			self.enqueue.call_count, 0, "a retry must wait for its backoff, not run immediately"
+		)
+		retry_after = frappe.db.get_value("LMS Speaking Submission", name, "retry_after")
+		self.assertIsNotNone(retry_after, "no backoff recorded")
+		delay = (get_datetime(retry_after) - before).total_seconds()
+		self.assertAlmostEqual(delay, retry_delay(1), delta=5)
+
+	def test_backoff_lengthens_with_each_attempt(self):
+		"""Each failure waits longer, per RETRY_DELAYS_SECONDS."""
+		seen = []
+		for attempt in range(1, MAX_RETRIES + 1):
+			name = self._submission(status="Transcribing", retry_count=attempt - 1)
+			before = now_datetime()
+			_handle_failure(name, RuntimeError("transient"))
+			retry_after = frappe.db.get_value("LMS Speaking Submission", name, "retry_after")
+			seen.append(round((get_datetime(retry_after) - before).total_seconds()))
+
+		self.assertEqual(seen, [retry_delay(n) for n in range(1, MAX_RETRIES + 1)])
+		self.assertEqual(seen, sorted(seen), f"backoff must not shrink: {seen}")
+
+	def test_a_submission_inside_its_backoff_cannot_be_claimed(self):
+		"""The wait is enforced at the claim, so it holds however the job arrives."""
+		name = self._submission(status="Transcribing", retry_count=0)
+		_handle_failure(name, RuntimeError("transient"))
+		self.assertEqual(self._row(name).status, "Queued")
+
+		self.assertFalse(_claim(name), "claimed while still inside the retry backoff")
+		self.assertEqual(self._row(name).status, "Queued", "a refused claim must not change state")
+
+	def test_the_claim_succeeds_once_the_backoff_elapses(self):
+		name = self._submission(status="Transcribing", retry_count=0)
+		_handle_failure(name, RuntimeError("transient"))
+
+		frappe.db.set_value(
+			"LMS Speaking Submission", name, "retry_after", add_to_date(now_datetime(), seconds=-1)
+		)
+		frappe.db.commit()
+
+		self.assertTrue(_claim(name))
+		self.assertIsNone(
+			frappe.db.get_value("LMS Speaking Submission", name, "retry_after"),
+			"a served backoff must be cleared, not inherited by the next failure",
+		)
+
+	# --- the dispatcher --------------------------------------------------
+
+	def test_dispatcher_ignores_a_submission_still_waiting(self):
+		name = self._submission(status="Transcribing", retry_count=0)
+		_handle_failure(name, RuntimeError("transient"))
+		self.enqueue.reset_mock()
+
+		self.assertNotIn(name, dispatch_due_retries()["dispatched"])
+		self.assertEqual(self.enqueue.call_count, 0)
+
+	def test_dispatcher_enqueues_a_submission_whose_backoff_elapsed(self):
+		name = self._submission(status="Transcribing", retry_count=0)
+		_handle_failure(name, RuntimeError("transient"))
+		frappe.db.set_value(
+			"LMS Speaking Submission", name, "retry_after", add_to_date(now_datetime(), seconds=-1)
+		)
+		frappe.db.commit()
+		self.enqueue.reset_mock()
+
+		self.assertIn(name, dispatch_due_retries()["dispatched"])
+		self.assertIn(name, [c.kwargs.get("submission_name") for c in self.enqueue.call_args_list])
+
+	def test_dispatcher_leaves_finished_submissions_alone(self):
+		for status in ("Ready", "Failed"):
+			with self.subTest(status=status):
+				name = self._submission(status=status)
+				frappe.db.set_value(
+					"LMS Speaking Submission",
+					name,
+					"retry_after",
+					add_to_date(now_datetime(), seconds=-60),
+				)
+				frappe.db.commit()
+				self.assertNotIn(name, dispatch_due_retries()["dispatched"])
 
 	def test_gives_up_once_retries_are_exhausted(self):
 		name = self._submission(status="Transcribing", retry_count=MAX_RETRIES)
