@@ -1,0 +1,246 @@
+/*
+ * Accessibility (§6.3, Ek-4.1)
+ *
+ * Four independent switches, all driven by data attributes on <html> so
+ * they compose: a student can run large text AND high contrast AND
+ * reduced motion at once, which is a common combination and a bad one to
+ * force a choice between.
+ *
+ *   data-font-step="1".."6"      six font steps
+ *   data-contrast="high"         high-contrast palette
+ *   data-whiteboard="true"       smart-board mode
+ *   data-reduce-motion="true"    explicit motion reduction
+ */
+
+/* ---------------------------------------------------------------------------
+ * 1. Font scale (§6.3 "6 font kademe: CSS variables ile tum tasarim
+ *    sistemine uygulanir")
+ *
+ * Set once on the root. Tailwind and frappe-ui size everything in rem, so
+ * this single declaration rescales the entire design system rather than
+ * each component having to opt in — which is what "tum tasarim sistemine"
+ * asks for and what a per-component approach always fails to deliver
+ * completely.
+ *
+ * Values mirror FONT_STEPS in accessibility_rules.py.
+ * ------------------------------------------------------------------------ */
+:root {
+	--lms-font-base: 16px;
+}
+
+html[data-font-step='1'] { --lms-font-base: 13px; }
+html[data-font-step='2'] { --lms-font-base: 14px; }
+html[data-font-step='3'] { --lms-font-base: 16px; }
+html[data-font-step='4'] { --lms-font-base: 18px; }
+html[data-font-step='5'] { --lms-font-base: 21px; }
+html[data-font-step='6'] { --lms-font-base: 24px; }
+
+html {
+	font-size: var(--lms-font-base);
+}
+
+/*
+ * WCAG 1.4.4 Resize Text requires content to remain usable at 200% zoom.
+ * Horizontal scrolling is the usual way that breaks, so nothing may force
+ * the viewport wider at the largest steps.
+ */
+html[data-font-step='5'] body,
+html[data-font-step='6'] body {
+	overflow-x: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. Focus visibility (WCAG 2.4.7)
+ *
+ * A keyboard user who cannot see where they are is not navigating, they
+ * are guessing. :focus-visible keeps the ring off mouse clicks, so this
+ * costs pointer users nothing.
+ * ------------------------------------------------------------------------ */
+:focus-visible {
+	outline: 2px solid var(--lms-focus-color, #0b3d91);
+	outline-offset: 2px;
+	border-radius: 2px;
+}
+
+/* Never remove the ring without replacing it. */
+:focus:not(:focus-visible) {
+	outline: none;
+}
+
+/*
+ * Skip link: the first tab stop on every page, visible only when focused.
+ * Without it a keyboard user tabs through the entire sidebar on every
+ * navigation (WCAG 2.4.1 Bypass Blocks).
+ */
+.lms-skip-link {
+	position: absolute;
+	left: -9999px;
+	top: 0;
+	z-index: 100;
+	padding: 0.75rem 1rem;
+	background: #ffffff;
+	color: #111111;
+	border: 2px solid #0b3d91;
+	border-radius: 0 0 4px 0;
+	font-weight: 600;
+}
+
+.lms-skip-link:focus {
+	left: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. High contrast (§6.3 "kontrast")
+ *
+ * Palette verified at AAA (7:1) by test_accessibility_rules.py — a
+ * student who turns this on has already told us the default is not
+ * working for them, so AA is not an ambitious enough target. Values
+ * mirror HIGH_CONTRAST_PALETTE in accessibility_rules.py.
+ * ------------------------------------------------------------------------ */
+html[data-contrast='high'] {
+	--lms-focus-color: #0b3d91;
+
+	/* frappe-ui theme variables, overridden wholesale. */
+	--ink-gray-9: #111111;
+	--ink-gray-8: #111111;
+	--ink-gray-7: #1f1f1f;
+	--ink-gray-6: #3d3d3d;
+	--ink-gray-5: #3d3d3d;
+	--ink-gray-4: #3d3d3d;
+
+	--surface-white: #ffffff;
+	--surface-gray-1: #ffffff;
+	--surface-gray-2: #f2f2f2;
+
+	--outline-gray-1: #111111;
+	--outline-gray-2: #111111;
+	--outline-gray-3: #111111;
+}
+
+/*
+ * Borders carry meaning — they separate a row from the next, a field from
+ * its neighbour (WCAG 1.4.11 Non-text Contrast). A hairline that vanishes
+ * in high contrast removes structure rather than decoration.
+ */
+html[data-contrast='high'] .border,
+html[data-contrast='high'] [class*='border-outline'] {
+	border-color: #111111 !important;
+}
+
+html[data-contrast='high'] a:not([class*='button']) {
+	color: #0b3d91;
+	text-decoration: underline;
+}
+
+/*
+ * Colour must not be the only carrier of meaning (WCAG 1.4.1). In high
+ * contrast, back the correct/incorrect states with a glyph so they read
+ * without colour vision.
+ */
+html[data-contrast='high'] [data-state='correct']::before {
+	content: '✓ ';
+	font-weight: 700;
+}
+
+html[data-contrast='high'] [data-state='incorrect']::before {
+	content: '✗ ';
+	font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+ * 4. Whiteboard mode (Ek-4.1: "Full-screen; buyuk tik hedefleri;
+ *    hover'a bagli etkilesim yok")
+ *
+ * A smart board is operated with a finger, from a distance, by a teacher
+ * who is also talking to a class. Three consequences:
+ * ------------------------------------------------------------------------ */
+
+/* (a) Targets sized for a finger, not a cursor. 56px rather than the WCAG
+ *     2.5.5 minimum of 44px, because the board is touched from further away. */
+html[data-whiteboard='true'] button,
+html[data-whiteboard='true'] a[role='button'],
+html[data-whiteboard='true'] [role='tab'],
+html[data-whiteboard='true'] input[type='checkbox'],
+html[data-whiteboard='true'] input[type='radio'],
+html[data-whiteboard='true'] select {
+	min-height: 56px;
+	min-width: 56px;
+}
+
+html[data-whiteboard='true'] button,
+html[data-whiteboard='true'] a[role='button'] {
+	padding-left: 1.25rem;
+	padding-right: 1.25rem;
+	font-size: 1.0625em;
+}
+
+/*
+ * (b) Nothing may depend on hover. A touch screen has no hover state, so
+ *     controls revealed by it are simply unreachable — this is why the
+ *     video player's controls are pinned open here.
+ */
+html[data-whiteboard='true'] .group-hover\:visible,
+html[data-whiteboard='true'] .invisible.group-hover\:visible {
+	visibility: visible !important;
+}
+
+html[data-whiteboard='true'] .opacity-0 {
+	opacity: 1 !important;
+}
+
+/* (c) Minimal chrome: the class is looking at content, not navigation. */
+html[data-whiteboard='true'] [data-whiteboard-hide] {
+	display: none !important;
+}
+
+html[data-whiteboard='true'] {
+	--lms-font-base: 21px;
+}
+
+/* An explicit step still wins: a teacher who chose a size meant it. */
+html[data-whiteboard='true'][data-font-step='1'] { --lms-font-base: 13px; }
+html[data-whiteboard='true'][data-font-step='2'] { --lms-font-base: 14px; }
+html[data-whiteboard='true'][data-font-step='3'] { --lms-font-base: 16px; }
+html[data-whiteboard='true'][data-font-step='4'] { --lms-font-base: 18px; }
+html[data-whiteboard='true'][data-font-step='5'] { --lms-font-base: 21px; }
+html[data-whiteboard='true'][data-font-step='6'] { --lms-font-base: 24px; }
+
+/* ---------------------------------------------------------------------------
+ * 5. Reduced motion (WCAG 2.3.3)
+ *
+ * Honours the OS setting, and an explicit in-app toggle for users on a
+ * device where that setting is unavailable or not theirs to change — a
+ * shared school computer, for instance.
+ * ------------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}
+
+html[data-reduce-motion='true'] *,
+html[data-reduce-motion='true'] *::before,
+html[data-reduce-motion='true'] *::after {
+	animation-duration: 0.01ms !important;
+	animation-iteration-count: 1 !important;
+	transition-duration: 0.01ms !important;
+	scroll-behavior: auto !important;
+}
+
+/* Screen-reader-only text that still reaches assistive technology. */
+.lms-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border-width: 0;
+}

@@ -27,7 +27,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 4.10 | FinOps / CUR dashboards | 🔨/🏗️ | Owner dashboard with application-metered cost estimate (Ek-6.3 unit prices, clearly labelled) 🔨; authoritative CUR+Athena feed 🏗️ |
 | 5.1 | Stack (changed by ADR) | 🔨 | `docs/adr/ADR-0001-stack-change-frappe-lms.md` |
 | 6.1 | Uptime, RPO/RTO | 🔨/🏗️ | Multi-AZ by default 🏗️; RPO/RTO measured rather than assumed — `dr_rules.py` evaluates backup freshness against the 15min–1hr target (a missing backup reports *unknown*, never healthy) and breaks the 4-hour RTO into a phase budget, surfaced by `get_dr_readiness` |
-| 6.3 | Accessibility: 6 font steps, whiteboard mode, WCAG AA | ⏭️ | frontend increment (CSS vars exist in frappe-ui theme) |
+| 6.3 | Accessibility: 6 font steps, whiteboard mode, WCAG AA | 🔨 | Six font steps applied via a single root CSS variable so the whole design system rescales; high-contrast palette **verified at AAA by computing the ratios in tests** (not asserted); whiteboard mode with 56px targets and no hover-dependent controls; focus ring, skip link, reduced motion, colour-independent state glyphs. Per-user prefs persisted server-side + localStorage for first-paint. **Not an audit** — no assistive-technology testing; see `docs/accessibility.md` for the honest gap list |
 | 6.4 | KVKK: retention, audit log, encryption | 🔨/🏗️ | `track_changes` on all new doctypes + override audit comments; Ek-2 retention purge jobs (audio 30d, transcripts 1y, exam results 2y — all configurable, 0 = keep forever) in `retention.py` 🔨; S3/KMS 🏗️ |
 | 7.3 | API error envelope + correlationId | 🔨 | `lms/lms/language_platform/envelope.py` decorator used by module APIs |
 | 8.x | AWS infra (VPC, ECS, CloudFront, S3, …) | 🔨 | **`dil-platformu-infra`** repo: 10 Terraform modules (network, data, compute, edge, media, ai, security, observability, finops, search) + bootstrap + dev/prod roots; `terraform validate` green. Remaining: MediaPackage DRM, DR replication |
@@ -73,4 +73,5 @@ commercial purchase, or a scheduled operational exercise:
 - DRM vendor procurement + player EME integration (§4.4.3, §1.2)
 - NexGuard licence + back-catalogue re-transcode (§4.4.3 Premium)
 - first DR drill and restore test (§8.18 — the tracking is built; the exercise is not)
-- accessibility pass: 6 font steps, whiteboard mode, WCAG 2.1 AA (§6.3)
+- accessibility **audit**: screen-reader walkthrough and axe/Lighthouse in CI (§6.3 —
+  the implementation is done; conformance testing needs assistive tech and a human)

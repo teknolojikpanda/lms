@@ -243,6 +243,11 @@ const routes = [
 		component: () => import('@/pages/OwnerDashboard.vue'),
 	},
 	{
+		path: '/accessibility',
+		name: 'AccessibilitySettings',
+		component: () => import('@/pages/AccessibilitySettings.vue'),
+	},
+	{
 		path: '/placement-tests',
 		name: 'PlacementTests',
 		component: () => import('@/pages/PlacementTests.vue'),

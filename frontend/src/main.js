@@ -10,6 +10,12 @@ import { usersStore } from './stores/user'
 import { initSocket } from './socket'
 import { FrappeUI, setConfig, frappeRequest, pageMetaPlugin } from 'frappe-ui'
 import { telemetryPlugin } from 'frappe-ui/frappe'
+import { initAccessibility, loadAccessibility } from './stores/accessibility'
+
+// Before mount: applies the cached font step and contrast mode so the very
+// first paint is already correct. A user who needs 24px text should never
+// read 16px text while an API call resolves (§6.3).
+initAccessibility()
 
 let pinia = createPinia()
 let app = createApp(App)
@@ -31,6 +37,9 @@ app.provide('$allUsers', allUsers)
 watch(userResource, () => {
 	if (userResource.data) {
 		app.use(telemetryPlugin, { app_name: 'lms' })
+		// Reconcile with the server copy so settings follow the user
+		// between devices.
+		loadAccessibility()
 	}
 })
 

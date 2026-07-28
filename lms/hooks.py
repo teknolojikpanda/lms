@@ -95,6 +95,7 @@ permission_query_conditions = {
 	"LMS Video Overlay": "lms.lms.doctype.lms_video_overlay.lms_video_overlay.get_permission_query_conditions",
 	"LMS Overlay Response": "lms.lms.doctype.lms_overlay_response.lms_overlay_response.get_permission_query_conditions",
 	"LMS Speaking Submission": "lms.lms.doctype.lms_speaking_submission.lms_speaking_submission.get_permission_query_conditions",
+	"LMS Accessibility Preference": "lms.lms.doctype.lms_accessibility_preference.lms_accessibility_preference.get_permission_query_conditions",
 }
 
 has_permission = {
