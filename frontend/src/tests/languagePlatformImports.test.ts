@@ -6,13 +6,16 @@ import { describe, expect, it, vi } from 'vitest'
 const passthrough = { template: '<div><slot /><slot name="default" /><slot name="actions" /></div>' }
 
 vi.mock('frappe-ui', () => ({
+	AxisChart: passthrough,
 	Badge: passthrough,
 	Breadcrumbs: passthrough,
 	Button: passthrough,
 	Dialog: passthrough,
+	DonutChart: passthrough,
 	Dropdown: passthrough,
 	FormControl: passthrough,
 	LoadingIndicator: passthrough,
+	NumberChart: passthrough,
 	createResource: (opts: object) => ({ ...opts, data: null, fetch: vi.fn(), reload: vi.fn() }),
 	call: vi.fn(),
 	toast: { success: vi.fn(), error: vi.fn() },
@@ -61,5 +64,10 @@ describe('language platform frontend modules', () => {
 	it('compiles the speaking pages', async () => {
 		expect((await import('@/pages/SpeakingPractice.vue')).default).toBeTruthy()
 		expect((await import('@/pages/SpeakingGrading.vue')).default).toBeTruthy()
+	})
+
+	it('compiles the dashboards', async () => {
+		expect((await import('@/pages/AdminDashboard.vue')).default).toBeTruthy()
+		expect((await import('@/pages/OwnerDashboard.vue')).default).toBeTruthy()
 	})
 })

@@ -636,6 +636,24 @@ const getSidebarItems = (forMobile = false) => {
 					},
 					activeFor: ['SpeakingGrading'],
 				},
+				{
+					label: 'Institution Dashboard',
+					icon: 'LayoutDashboard',
+					to: 'AdminDashboard',
+					condition: () => {
+						return !forMobile && userResource?.data?.is_moderator
+					},
+					activeFor: ['AdminDashboard'],
+				},
+				{
+					label: 'Owner Dashboard',
+					icon: 'Building2',
+					to: 'OwnerDashboard',
+					condition: () => {
+						return !forMobile && userResource?.data?.is_system_manager
+					},
+					activeFor: ['OwnerDashboard'],
+				},
 			],
 		},
 	]

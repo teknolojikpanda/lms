@@ -17,6 +17,7 @@ import frappe
 from lms.lms.doctype.lms_placement_attempt import lms_placement_attempt as placement
 from lms.lms.doctype.lms_speaking_submission import lms_speaking_submission as speaking
 from lms.lms.doctype.lms_video_overlay import lms_video_overlay as overlay
+from lms.lms.language_platform import admin_api
 from lms.lms.language_platform.envelope import envelope
 
 
@@ -90,3 +91,15 @@ def get_grading_queue():
 @envelope
 def override_speaking_score(submission: str, final_score: float, reason: str):
 	return speaking.override_speaking_score(submission, final_score, reason)
+
+
+@frappe.whitelist()
+@envelope
+def get_admin_dashboard():
+	return admin_api.get_admin_dashboard()
+
+
+@frappe.whitelist()
+@envelope
+def get_owner_dashboard():
+	return admin_api.get_owner_dashboard()
