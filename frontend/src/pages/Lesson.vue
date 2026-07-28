@@ -125,6 +125,20 @@
 										{{ __('Edit') }}
 									</Button>
 								</router-link>
+								<router-link
+									v-if="isAdmin && !embedded && lesson.data?.name"
+									:to="{
+										name: 'VideoOverlayEditor',
+										params: { lessonName: lesson.data.name },
+									}"
+								>
+									<Button>
+										<template #prefix>
+											<span class="lucide-layers size-4" />
+										</template>
+										{{ __('Overlays') }}
+									</Button>
+								</router-link>
 								<Tooltip v-else-if="canGoZen()" :text="__('Zen Mode')">
 									<Button @click="goFullScreen()">
 										<template #icon>
@@ -352,6 +366,7 @@ import {
 } from '@/utils/lessonProgress'
 import EditorJS from '@editorjs/editorjs'
 import LessonContent from '@/components/LessonContent.vue'
+import { setOverlayLesson, clearOverlayLesson } from '@/stores/overlayContext'
 import CourseInstructors from '@/components/CourseInstructors.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
 import Discussions from '@/components/Discussions.vue'
@@ -468,6 +483,7 @@ onBeforeUnmount(() => {
 	if (!props.embedded && collapsedByLesson)
 		sidebarStore.isSidebarCollapsed = false
 	trackVideoWatchDuration()
+	clearOverlayLesson()
 })
 
 const lesson = createResource({
@@ -500,6 +516,7 @@ const setupLesson = (data) => {
 		})
 	}
 	lessonProgress.value = data.membership?.progress
+	setOverlayLesson(data.name)
 	if (data.content) editor.value = renderEditor('editor', data.content)
 	if (
 		data.instructor_content &&

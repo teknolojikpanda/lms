@@ -133,7 +133,25 @@ def create_speaking_submission(prompt: str, audio_file: str, duration_seconds: f
 		}
 	)
 	doc.insert(ignore_permissions=True)
+	_attach_audio_file(doc, audio_file)
 	return {"name": doc.name, "status": doc.status}
+
+
+def _attach_audio_file(doc, audio_file: str):
+	"""Link the pre-uploaded recording to the submission so the retention
+	purge job (Ek-2) finds and deletes it with the document context."""
+	file_name = frappe.db.get_value(
+		"File",
+		{"file_url": audio_file, "owner": frappe.session.user, "attached_to_doctype": ["is", "not set"]},
+		"name",
+	)
+	if file_name:
+		frappe.db.set_value(
+			"File",
+			file_name,
+			{"attached_to_doctype": "LMS Speaking Submission", "attached_to_name": doc.name},
+			update_modified=False,
+		)
 
 
 @frappe.whitelist()

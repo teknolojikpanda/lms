@@ -14,13 +14,13 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 4.4.1 | Course → unit → lesson hierarchy, CEFR + skill tags | ✅/🔨 | LMS Course/Chapter/Lesson ✅; CEFR metadata on questions 🔨 (`lms_question`) |
 | 4.4.2 | HLS player, subtitles, speed, shortcuts | ✅/🏗️ | Plyr-based video blocks ✅; HLS/ABR + signed cookies 🏗️ |
 | 4.4.3 | Video protection (signed cookies, DRM opt.) | 🏗️ | CloudFront + OAC (infra repo) |
-| 4.5 | **Video overlay (timestamp question/note)** | 🔨 | `LMS Video Overlay`, `LMS Overlay Response` + APIs; rules: timestamp validation, optimistic `version` lock, scope visibility (Global/Course/Batch), question payload via LMS Question |
-| 4.6 | **Placement test** (blueprint, score→level mapping, admin override + audit) | 🔨 | `LMS Placement Blueprint` (+segments, +level mapping), `LMS Placement Attempt`, APIs in the doctype controllers |
+| 4.5 | **Video overlay (timestamp question/note)** | 🔨 | `LMS Video Overlay`, `LMS Overlay Response` + APIs; rules: timestamp validation, optimistic `version` lock, scope visibility (Global/Course/Batch), question payload via LMS Question. UI: player integration in `VideoBlock.vue` (markers, pause+popup, answers) + teacher editor `VideoOverlayEditor.vue` |
+| 4.6 | **Placement test** (blueprint, score→level mapping, admin override + audit) | 🔨 | `LMS Placement Blueprint` (+segments, +level mapping), `LMS Placement Attempt`, APIs in the doctype controllers. UI: `PlacementTests.vue` + `PlacementAttempt.vue` (timer, autosave, per-skill result) |
 | 4.7.1 | Question types incl. difficulty/duration metadata | ✅/🔨 | LMS Question ✅ + difficulty/level/skill/topic fields 🔨 |
 | 4.7.2 | **Deterministic blueprint randomization (MUST)** | 🔨 | `lms/lms/language_platform/exam_engine.py` — segment fill → remainder, no in-attempt duplicates, retake exposure control, seed persisted on attempt |
 | 4.7.3 | Exam security (server-authoritative timer, resume) | ✅/⏭️ | Quiz timer ✅ (server check ⏭️); attempt resume on placement 🔨 |
 | 4.8 | Progress events + risk heuristics | ✅/⏭️ | Course progress, watch duration ✅; risk scoring ⏭️ |
-| 4.9 | **AI speaking pipeline** | 🔨 | `LMS Speaking Prompt`, `LMS Speaking Submission` (+ rubric child); state machine Queued→Transcribing→Scoring→Ready/Failed; metrics (wpm, TTR, filler ratio); provider abstraction (mock default, AWS Transcribe/Bedrock adapters); teacher override preserves `ai_total_score` |
+| 4.9 | **AI speaking pipeline** | 🔨 | `LMS Speaking Prompt`, `LMS Speaking Submission` (+ rubric child); state machine Queued→Transcribing→Scoring→Ready/Failed; metrics (wpm, TTR, filler ratio); provider abstraction (mock default, AWS Transcribe/Bedrock adapters); teacher override preserves `ai_total_score`. UI: `SpeakingPractice.vue` (MediaRecorder, upload, polling, rubric feedback) + `SpeakingGrading.vue` (queue + audited override) |
 | 4.9.3 | Speaking data privacy (retention, disclosure) | 🔨/🏗️ | Retention days + daily quota in module settings 🔨; S3 lifecycle 🏗️ |
 | 4.10 | FinOps / CUR dashboards | 🏗️/⏭️ | CUR+Athena infra 🏗️; owner UI ⏭️ |
 | 5.1 | Stack (changed by ADR) | 🔨 | `docs/adr/ADR-0001-stack-change-frappe-lms.md` |
@@ -32,7 +32,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 10.1 | Mandatory tests (blueprint respected, no dupes, deterministic seed, isolation) | 🔨 | `lms/tests/language_platform/` (pure unit) + doctype test stubs (bench CI) |
 | Ek-1 | RBAC matrix | 🔨 | Doctype permission tables on new doctypes mirror Ek-1 |
 | Ek-2 | Retention matrix | 🔨/🏗️ | Speaking audio retention setting 🔨; lifecycle policies 🏗️ |
-| Ek-4 | Screen specs (4 portals) | ⏭️ | Existing LMS UI covers student/teacher course flows; new module screens are the next frontend increment |
+| Ek-4 | Screen specs (4 portals) | 🔨/⏭️ | Existing LMS UI covers student/teacher course flows; new module screens delivered: placement taking, overlay editor + in-player overlays, speaking practice, grading center. Remaining: admin/owner dashboards per Ek-4.3/4.4 |
 
 ## Increment plan
 
