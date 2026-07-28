@@ -1,0 +1,190 @@
+{
+ "actions": [],
+ "creation": "2026-07-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "lesson",
+  "course",
+  "timestamp_ms",
+  "column_break_head",
+  "type",
+  "scope",
+  "batch",
+  "section_break_content",
+  "question",
+  "marks",
+  "note_text",
+  "column_break_content",
+  "pause_video",
+  "published",
+  "version"
+ ],
+ "fields": [
+  {
+   "fieldname": "lesson",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Lesson",
+   "options": "Course Lesson",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "lesson.course",
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Course",
+   "options": "LMS Course",
+   "read_only": 1
+  },
+  {
+   "fieldname": "timestamp_ms",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Timestamp (ms)",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Note",
+   "fieldname": "type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Type",
+   "options": "Note\nQuestion",
+   "reqd": 1
+  },
+  {
+   "default": "Course",
+   "fieldname": "scope",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Scope",
+   "options": "Global\nCourse\nBatch",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.scope == 'Batch'",
+   "fieldname": "batch",
+   "fieldtype": "Link",
+   "label": "Batch",
+   "mandatory_depends_on": "eval:doc.scope == 'Batch'",
+   "options": "LMS Batch"
+  },
+  {
+   "fieldname": "section_break_content",
+   "fieldtype": "Section Break",
+   "label": "Content"
+  },
+  {
+   "depends_on": "eval:doc.type == 'Question'",
+   "fieldname": "question",
+   "fieldtype": "Link",
+   "label": "Question",
+   "mandatory_depends_on": "eval:doc.type == 'Question'",
+   "options": "LMS Question"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:doc.type == 'Question'",
+   "fieldname": "marks",
+   "fieldtype": "Int",
+   "label": "Marks",
+   "non_negative": 1
+  },
+  {
+   "depends_on": "eval:doc.type == 'Note'",
+   "fieldname": "note_text",
+   "fieldtype": "Text Editor",
+   "label": "Note"
+  },
+  {
+   "fieldname": "column_break_content",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "pause_video",
+   "fieldtype": "Check",
+   "label": "Pause Video at Timestamp"
+  },
+  {
+   "default": "0",
+   "fieldname": "published",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Published"
+  },
+  {
+   "default": "1",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Version",
+   "read_only": 1
+  }
+ ],
+ "links": [
+  {
+   "link_doctype": "LMS Overlay Response",
+   "link_fieldname": "overlay"
+  }
+ ],
+ "modified": "2026-07-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Video Overlay",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Moderator",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Course Creator",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "LMS Student"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

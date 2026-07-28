@@ -1,0 +1,129 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:SPK-{#####}",
+ "creation": "2026-07-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "enabled",
+  "column_break_head",
+  "language_level",
+  "topic",
+  "max_duration_seconds",
+  "section_break_scenario",
+  "scenario"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "language_level",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Level (CEFR)",
+   "options": "\nA1\nA2\nB1\nB2\nC1\nC2"
+  },
+  {
+   "fieldname": "topic",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Topic"
+  },
+  {
+   "default": "120",
+   "fieldname": "max_duration_seconds",
+   "fieldtype": "Int",
+   "label": "Max Duration (seconds)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "section_break_scenario",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "scenario",
+   "fieldtype": "Text Editor",
+   "label": "Scenario / Role-play Instructions",
+   "reqd": 1
+  }
+ ],
+ "links": [
+  {
+   "link_doctype": "LMS Speaking Submission",
+   "link_fieldname": "prompt"
+  }
+ ],
+ "modified": "2026-07-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Speaking Prompt",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Moderator",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Course Creator",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "LMS Student"
+  }
+ ],
+ "show_title_field_in_link": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

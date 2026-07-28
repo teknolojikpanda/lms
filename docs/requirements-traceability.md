@@ -1,0 +1,46 @@
+# Requirements Traceability — Technical Agreement v1.3 → frappe/lms
+
+Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this increment) ·
+🏗️ infrastructure scope (Terraform/AWS, separate repo) · ⏭️ next increment
+
+| § | Requirement | Status | Where |
+|---|---|---|---|
+| 1.1 | B2B multi-tenant, tenant isolation | 🔨 | Tenant = Frappe site (ADR-0001); provisioning automation 🏗️ |
+| 3.1 | 4-role hierarchy | ✅ | Role mapping in ADR-0001 (Moderator / Course Creator / Batch Evaluator / LMS Student) |
+| 3.2 | Separate portal URLs | ✅/⏭️ | SPA route groups per role; subdomain per tenant 🏗️ |
+| 4.1 | Landing page + lead form | ⏭️ | Frappe Web Pages / static site; references list doctype ⏭️ |
+| 4.2 | Auth, user lifecycle (invite, CSV import, deactivate) | ✅ | Frappe users + LMS onboarding; CSV import via Data Import |
+| 4.3 | Institution → branch → class → student | ✅/⏭️ | LMS Batch (+ enrollment); branch layer ⏭️ |
+| 4.4.1 | Course → unit → lesson hierarchy, CEFR + skill tags | ✅/🔨 | LMS Course/Chapter/Lesson ✅; CEFR metadata on questions 🔨 (`lms_question`) |
+| 4.4.2 | HLS player, subtitles, speed, shortcuts | ✅/🏗️ | Plyr-based video blocks ✅; HLS/ABR + signed cookies 🏗️ |
+| 4.4.3 | Video protection (signed cookies, DRM opt.) | 🏗️ | CloudFront + OAC (infra repo) |
+| 4.5 | **Video overlay (timestamp question/note)** | 🔨 | `LMS Video Overlay`, `LMS Overlay Response` + APIs; rules: timestamp validation, optimistic `version` lock, scope visibility (Global/Course/Batch), question payload via LMS Question |
+| 4.6 | **Placement test** (blueprint, score→level mapping, admin override + audit) | 🔨 | `LMS Placement Blueprint` (+segments, +level mapping), `LMS Placement Attempt`, APIs in the doctype controllers |
+| 4.7.1 | Question types incl. difficulty/duration metadata | ✅/🔨 | LMS Question ✅ + difficulty/level/skill/topic fields 🔨 |
+| 4.7.2 | **Deterministic blueprint randomization (MUST)** | 🔨 | `lms/lms/language_platform/exam_engine.py` — segment fill → remainder, no in-attempt duplicates, retake exposure control, seed persisted on attempt |
+| 4.7.3 | Exam security (server-authoritative timer, resume) | ✅/⏭️ | Quiz timer ✅ (server check ⏭️); attempt resume on placement 🔨 |
+| 4.8 | Progress events + risk heuristics | ✅/⏭️ | Course progress, watch duration ✅; risk scoring ⏭️ |
+| 4.9 | **AI speaking pipeline** | 🔨 | `LMS Speaking Prompt`, `LMS Speaking Submission` (+ rubric child); state machine Queued→Transcribing→Scoring→Ready/Failed; metrics (wpm, TTR, filler ratio); provider abstraction (mock default, AWS Transcribe/Bedrock adapters); teacher override preserves `ai_total_score` |
+| 4.9.3 | Speaking data privacy (retention, disclosure) | 🔨/🏗️ | Retention days + daily quota in module settings 🔨; S3 lifecycle 🏗️ |
+| 4.10 | FinOps / CUR dashboards | 🏗️/⏭️ | CUR+Athena infra 🏗️; owner UI ⏭️ |
+| 5.1 | Stack (changed by ADR) | 🔨 | `docs/adr/ADR-0001-stack-change-frappe-lms.md` |
+| 6.3 | Accessibility: 6 font steps, whiteboard mode, WCAG AA | ⏭️ | frontend increment (CSS vars exist in frappe-ui theme) |
+| 6.4 | KVKK: retention, audit log, encryption | 🔨/🏗️ | `track_changes` on all new doctypes + override audit comments 🔨; S3/KMS 🏗️ |
+| 7.3 | API error envelope + correlationId | 🔨 | `lms/lms/language_platform/envelope.py` decorator used by module APIs |
+| 8.x | AWS infra (VPC, ECS, CloudFront, S3, Step Functions…) | 🏗️ | Terraform repo (out of app-repo scope; see agreement Ek-5) |
+| 9.1 | Input validation, RBAC, rate limits | ✅/🔨 | Frappe schema validation + role perms; per-endpoint checks in new APIs 🔨 |
+| 10.1 | Mandatory tests (blueprint respected, no dupes, deterministic seed, isolation) | 🔨 | `lms/tests/language_platform/` (pure unit) + doctype test stubs (bench CI) |
+| Ek-1 | RBAC matrix | 🔨 | Doctype permission tables on new doctypes mirror Ek-1 |
+| Ek-2 | Retention matrix | 🔨/🏗️ | Speaking audio retention setting 🔨; lifecycle policies 🏗️ |
+| Ek-4 | Screen specs (4 portals) | ⏭️ | Existing LMS UI covers student/teacher course flows; new module screens are the next frontend increment |
+
+## Increment plan
+
+1. **This increment (backend MVP):** ADR, CEFR metadata, exam engine, placement, video
+   overlays, speaking assessment, unit tests.
+2. **Frontend increment:** placement-taking UI, overlay editor + player integration, speaking
+   recorder + grading center (Vue pages under `frontend/src/pages`).
+3. **Infra increment (separate repo):** Terraform modules per Ek-5.1, site-per-tenant
+   provisioning, VOD pipeline, CUR/FinOps.
+4. **Hardening:** rate limits, server-authoritative exam timer, DSAR export/delete jobs,
+   OpenSearch, load tests (§6.6).

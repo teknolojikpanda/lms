@@ -1,0 +1,247 @@
+{
+ "actions": [],
+ "creation": "2026-07-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "member",
+  "prompt",
+  "status",
+  "column_break_head",
+  "audio_file",
+  "duration_seconds",
+  "retry_count",
+  "error_message",
+  "section_break_transcript",
+  "transcript",
+  "section_break_metrics",
+  "word_count",
+  "wpm",
+  "column_break_metrics",
+  "lexical_diversity",
+  "filler_ratio",
+  "section_break_scores",
+  "rubric_scores",
+  "ai_total_score",
+  "column_break_scores",
+  "final_score",
+  "is_overridden",
+  "override_by",
+  "override_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "member",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Member",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "prompt",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Prompt",
+   "options": "LMS Speaking Prompt",
+   "reqd": 1
+  },
+  {
+   "default": "Queued",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Queued\nTranscribing\nScoring\nReady\nFailed",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "audio_file",
+   "fieldtype": "Attach",
+   "label": "Audio File",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "duration_seconds",
+   "fieldtype": "Float",
+   "label": "Duration (seconds)",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "retry_count",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Retry Count",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.status == 'Failed'",
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_transcript",
+   "fieldtype": "Section Break",
+   "label": "Transcript"
+  },
+  {
+   "fieldname": "transcript",
+   "fieldtype": "Long Text",
+   "label": "Transcript",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_metrics",
+   "fieldtype": "Section Break",
+   "label": "Objective Metrics"
+  },
+  {
+   "default": "0",
+   "fieldname": "word_count",
+   "fieldtype": "Int",
+   "label": "Word Count",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "wpm",
+   "fieldtype": "Float",
+   "label": "Words per Minute",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_metrics",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "lexical_diversity",
+   "fieldtype": "Float",
+   "label": "Lexical Diversity (TTR)",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "filler_ratio",
+   "fieldtype": "Float",
+   "label": "Filler Ratio",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_scores",
+   "fieldtype": "Section Break",
+   "label": "Rubric Scores"
+  },
+  {
+   "fieldname": "rubric_scores",
+   "fieldtype": "Table",
+   "label": "Rubric Scores",
+   "options": "LMS Speaking Rubric Score"
+  },
+  {
+   "default": "0",
+   "fieldname": "ai_total_score",
+   "fieldtype": "Float",
+   "label": "AI Total Score",
+   "non_negative": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_scores",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "final_score",
+   "fieldtype": "Float",
+   "label": "Final Score",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_overridden",
+   "fieldtype": "Check",
+   "label": "Teacher Override",
+   "read_only": 1
+  },
+  {
+   "fieldname": "override_by",
+   "fieldtype": "Link",
+   "label": "Overridden By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "override_reason",
+   "fieldtype": "Small Text",
+   "label": "Override Reason",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Speaking Submission",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Moderator",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Course Creator",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Batch Evaluator",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "LMS Student"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

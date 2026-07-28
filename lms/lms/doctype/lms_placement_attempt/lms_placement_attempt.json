@@ -1,0 +1,213 @@
+{
+ "actions": [],
+ "creation": "2026-07-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "member",
+  "blueprint",
+  "status",
+  "column_break_head",
+  "attempt_number",
+  "seed",
+  "started_at",
+  "submitted_at",
+  "section_break_questions",
+  "questions",
+  "section_break_result",
+  "score",
+  "max_score",
+  "percentage",
+  "column_break_result",
+  "result_level",
+  "skill_scores",
+  "section_break_override",
+  "override_level",
+  "override_reason",
+  "override_by"
+ ],
+ "fields": [
+  {
+   "fieldname": "member",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Member",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "blueprint",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Blueprint",
+   "options": "LMS Placement Blueprint",
+   "reqd": 1
+  },
+  {
+   "default": "In Progress",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "In Progress\nCompleted",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "attempt_number",
+   "fieldtype": "Int",
+   "label": "Attempt Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "seed",
+   "fieldtype": "Data",
+   "label": "Selection Seed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Submitted At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_questions",
+   "fieldtype": "Section Break",
+   "label": "Questions"
+  },
+  {
+   "fieldname": "questions",
+   "fieldtype": "Table",
+   "label": "Questions",
+   "options": "LMS Placement Attempt Question"
+  },
+  {
+   "fieldname": "section_break_result",
+   "fieldtype": "Section Break",
+   "label": "Result"
+  },
+  {
+   "default": "0",
+   "fieldname": "score",
+   "fieldtype": "Float",
+   "label": "Score",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "max_score",
+   "fieldtype": "Float",
+   "label": "Max Score",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "percentage",
+   "fieldtype": "Float",
+   "label": "Percentage",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_result",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "result_level",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Result Level",
+   "options": "\nA1\nA2\nB1\nB2\nC1\nC2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "skill_scores",
+   "fieldtype": "JSON",
+   "label": "Skill Scores",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_override",
+   "fieldtype": "Section Break",
+   "label": "Level Override"
+  },
+  {
+   "fieldname": "override_level",
+   "fieldtype": "Select",
+   "label": "Override Level",
+   "options": "\nA1\nA2\nB1\nB2\nC1\nC2"
+  },
+  {
+   "fieldname": "override_reason",
+   "fieldtype": "Small Text",
+   "label": "Override Reason"
+  },
+  {
+   "fieldname": "override_by",
+   "fieldtype": "Link",
+   "label": "Overridden By",
+   "options": "User",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Placement Attempt",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Moderator",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Course Creator"
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "LMS Student"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

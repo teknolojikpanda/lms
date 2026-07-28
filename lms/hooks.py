@@ -91,6 +91,10 @@ after_migrate = [
 
 permission_query_conditions = {
 	"LMS Certificate": "lms.lms.doctype.lms_certificate.lms_certificate.get_permission_query_conditions",
+	"LMS Placement Attempt": "lms.lms.doctype.lms_placement_attempt.lms_placement_attempt.get_permission_query_conditions",
+	"LMS Video Overlay": "lms.lms.doctype.lms_video_overlay.lms_video_overlay.get_permission_query_conditions",
+	"LMS Overlay Response": "lms.lms.doctype.lms_overlay_response.lms_overlay_response.get_permission_query_conditions",
+	"LMS Speaking Submission": "lms.lms.doctype.lms_speaking_submission.lms_speaking_submission.get_permission_query_conditions",
 }
 
 has_permission = {
@@ -150,6 +154,7 @@ scheduler_events = {
 		"lms.lms.doctype.lms_live_class.lms_live_class.send_live_class_reminder",
 		"lms.lms.doctype.lms_course.lms_course.send_notification_for_published_courses",
 		"lms.lms.doctype.course_lesson.course_lesson.rename_settled_untitled_lessons",
+		"lms.lms.language_platform.speaking_pipeline.purge_expired_audio",
 	],
 }
 
