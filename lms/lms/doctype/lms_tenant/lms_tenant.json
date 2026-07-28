@@ -30,6 +30,7 @@
   "archived_at",
   "archival_reason",
   "purge_after",
+  "grace_days",
   "column_break_archival",
   "export_location",
   "backup_verified",
@@ -198,6 +199,14 @@
    "fieldname": "purge_after",
    "fieldtype": "Date",
    "label": "Purge Allowed After",
+   "read_only": 1
+  },
+  {
+   "default": "90",
+   "description": "Grace period actually granted at archival. Persisted because the caller may override the default, and every later eligibility check must use the number this tenant was archived under rather than the current default.",
+   "fieldname": "grace_days",
+   "fieldtype": "Int",
+   "label": "Grace Period (days)",
    "read_only": 1
   },
   {

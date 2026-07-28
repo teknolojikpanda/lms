@@ -51,8 +51,12 @@ services:
     command: bash /workspace/lms-src/docker/init-staging.sh
     environment:
       - SHELL=/bin/bash
-      # Branch to install from the mounted repo.
-      - LMS_BRANCH=feature/language-platform-mvp
+      # Branch to install from the mounted repo. Left unset on purpose:
+      # init-staging.sh then uses whatever branch the repo is actually on,
+      # so the bench follows your checkout instead of a name pinned here.
+      # Pinning it is how this broke before — the branch was later deleted
+      # and every fresh bench failed at `bench get-app`.
+      - LMS_BRANCH=
     working_dir: /home/frappe
     volumes:
       # Read-only: the bench copies the app out of here, and nothing in

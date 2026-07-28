@@ -9,7 +9,25 @@ set -e
 BENCH_DIR="/home/frappe/frappe-bench"
 SITE="staging.localhost"
 SRC="/workspace/lms-src"
-BRANCH="${LMS_BRANCH:-feature/language-platform-mvp}"
+
+# The bind-mounted repo is owned by the host user, not `frappe`, so git
+# refuses to read it ("dubious ownership") until the path is trusted.
+# Safe here: a throwaway container reading a read-only mount. Trusted
+# this early because resolving the branch below has to read the repo.
+git config --global --add safe.directory "${SRC}"
+git config --global --add safe.directory "${SRC}/.git"
+
+# Follow whatever branch the mounted repo is on, unless told otherwise.
+# A hardcoded name is how this broke once: the branch was deleted after
+# merging and every fresh bench then failed at `bench get-app`. A
+# detached checkout has no branch name to follow, so fall back.
+BRANCH="${LMS_BRANCH:-}"
+if [ -z "${BRANCH}" ]; then
+    BRANCH="$(git -C "${SRC}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+fi
+if [ -z "${BRANCH}" ] || [ "${BRANCH}" = "HEAD" ]; then
+    BRANCH="develop"
+fi
 
 export PATH="${NVM_DIR}/versions/node/v${NODE_VERSION_DEVELOP}/bin/:${PATH}"
 
@@ -45,12 +63,6 @@ echo "==> Fetching payments (required by the lms app)"
 bench get-app payments
 
 echo "==> Installing lms from the mounted repo, branch ${BRANCH}"
-# The bind-mounted repo is owned by the host user, not `frappe`, so git
-# refuses to read it ("dubious ownership") until the path is trusted.
-# Safe here: a throwaway container reading a read-only mount.
-git config --global --add safe.directory "${SRC}"
-git config --global --add safe.directory "${SRC}/.git"
-
 # `bench get-app` against a local path is what makes this install the
 # mounted repo rather than GitHub. Let it own the clone, the editable
 # install, the asset build and sites/apps.txt.

@@ -250,6 +250,10 @@ def check_purge_preconditions(
 
 # --- Roster import ------------------------------------------------------------
 
+# Where a valid row came from in the uploaded file. Reserved: parse_roster
+# writes it after normalisation, so an uploaded column cannot occupy it.
+ROSTER_SOURCE_ROW = "source_row"
+
 ROSTER_REQUIRED_COLUMNS = ("email", "first_name")
 ROSTER_OPTIONAL_COLUMNS = ("last_name", "class_name", "student_id", "level")
 
@@ -306,6 +310,15 @@ def parse_roster(rows: list[dict]) -> tuple[list[dict], list[dict]]:
 
 	Returns ``(valid_rows, errors)`` where each error carries the 1-based
 	row number so an admin can find it in their spreadsheet.
+
+	Every *valid* row carries its source position too, under the reserved
+	key ``ROSTER_SOURCE_ROW``. Callers that report failures of their own
+	need it: once the rejected rows are filtered out, a row's position in
+	``valid_rows`` no longer matches the spreadsheet, so counting the
+	survivors would misattribute a later failure to the wrong line — and
+	to a line that may already appear in ``errors`` for a different
+	reason. The key is assigned after normalisation, so a column of the
+	same name in the uploaded file cannot displace it.
 	"""
 	valid: list[dict] = []
 	errors: list[dict] = []
@@ -324,6 +337,7 @@ def parse_roster(rows: list[dict]) -> tuple[list[dict], list[dict]]:
 		if problems:
 			errors.append({"row": index, "email": email, "errors": problems})
 		else:
+			row[ROSTER_SOURCE_ROW] = index
 			valid.append(row)
 
 	return valid, errors

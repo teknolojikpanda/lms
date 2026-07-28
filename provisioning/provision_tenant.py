@@ -315,8 +315,9 @@ def purge(args) -> int:
 	"""Destroy a tenant site. There is no undo.
 
 	Guarded four ways — archived status, a recorded data export, a
-	verified backup, and an elapsed grace period — all re-checked in the
-	registry, plus a typed confirmation here. The guards live in
+	verified backup, and an elapsed grace period — all checked in the
+	registry *before* the site is dropped and re-checked after, plus a
+	typed confirmation here. The guards live in
 	`tenant_rules.check_purge_preconditions` so they are tested, and in
 	the registry so this CLI cannot be the only thing standing between an
 	operator and a deleted institution.
@@ -354,16 +355,29 @@ def purge(args) -> int:
 		print("error: refusing without --yes-i-am-sure.", file=sys.stderr)
 		return 5
 
-	print("[1/2] Dropping the site")
+	print("[1/3] Checking the registry guards")
+	# Before the irreversible step, never after it. This used to drop the
+	# site first and rely on mark_purged to refuse afterwards, which gets
+	# the order exactly backwards: a tenant that failed a guard ended up
+	# deleted anyway, with a registry still saying it was archived. The
+	# call throws on any unmet guard, and `run` raises on a non-zero exit,
+	# so a refusal here aborts before anything is destroyed.
+	bench_execute(
+		args.control_site,
+		"lms.lms.doctype.lms_tenant.lms_tenant.assert_purge_allowed",
+		{"subdomain": subdomain},
+		dry_run=args.dry_run,
+	)
+
+	print("\n[2/3] Dropping the site")
 	drop_command = ["bench", "drop-site", site, "--no-backup"]
 	if args.db_root_password:
 		drop_command += ["--root-password", args.db_root_password]
 	run(drop_command, dry_run=args.dry_run)
 
-	print("\n[2/2] Recording the purge in the registry")
-	# mark_purged re-checks every precondition and throws if any fails, so
-	# a site dropped out of process still cannot be recorded as a clean
-	# offboarding.
+	print("\n[3/3] Recording the purge in the registry")
+	# Re-checked rather than assumed: the guards were true a moment ago,
+	# and this is what makes the registry claim the site is gone.
 	bench_execute(
 		args.control_site,
 		"lms.lms.doctype.lms_tenant.lms_tenant.mark_purged",
