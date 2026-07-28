@@ -84,6 +84,28 @@ def get_watermark(lesson: str) -> dict:
 	return config
 
 
+def _request_context() -> dict:
+	"""IP and user agent when there is a request, blanks when there is not.
+
+	`frappe.local.request_ip` is unbound outside an HTTP request, so
+	reading it directly raises in a background job, a scheduled task or a
+	`bench execute` — contexts a watermark may legitimately be issued
+	from. The corroborating detail is worth having, but never worth
+	failing playback over.
+	"""
+	try:
+		ip = frappe.local.request_ip
+	except Exception:
+		ip = None
+
+	try:
+		agent = frappe.get_request_header("User-Agent") or ""
+	except Exception:
+		agent = ""
+
+	return {"ip_address": ip, "user_agent": agent[:500]}
+
+
 def _issue_session(lesson: str) -> str:
 	"""Create a new session code, retrying on the (unlikely) collision."""
 	member = frappe.session.user
@@ -101,8 +123,7 @@ def _issue_session(lesson: str) -> str:
 				"member": member,
 				"lesson": lesson,
 				"issued_at": now_datetime(),
-				"ip_address": frappe.local.request_ip,
-				"user_agent": (frappe.get_request_header("User-Agent") or "")[:500],
+				**_request_context(),
 			}
 		)
 		doc.insert(ignore_permissions=True)

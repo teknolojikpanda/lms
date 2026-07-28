@@ -20,6 +20,21 @@
 	<a href="https://docs.frappe.io/learning">Documentation</a>
 </div>
 
+> ### Language Platform fork
+>
+> This branch extends Frappe Learning into a B2B language-teaching
+> platform per the Technical Agreement v1.3 (placement tests, video
+> overlays, AI speaking assessment, KVKK data rights, tenant lifecycle,
+> watermarking, accessibility).
+>
+> **Run it locally with no AWS account:** [`docs/running-locally.md`](docs/running-locally.md)
+> — one Docker command.
+>
+> Other entry points: [requirements traceability](docs/requirements-traceability.md)
+> (every agreement clause → where it lives), [ADR-0001](docs/adr/ADR-0001-stack-change-frappe-lms.md)
+> (why Frappe), [tenant onboarding](docs/tenant-onboarding-runbook.md),
+> [accessibility](docs/accessibility.md), [staging bench](docs/staging-bench.md).
+
 ## Frappe Learning
 Frappe Learning is an easy-to-use learning system that helps you bring structure to your content.
 

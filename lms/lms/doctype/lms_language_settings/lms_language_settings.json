@@ -10,6 +10,7 @@
   "column_break_provider",
   "aws_region",
   "bedrock_model_id",
+  "speaking_stale_after_minutes",
   "limits_section",
   "max_practice_duration_seconds",
   "max_exam_duration_seconds",
@@ -84,6 +85,13 @@
    "fieldname": "bedrock_model_id",
    "fieldtype": "Data",
    "label": "Bedrock Model Id"
+  },
+  {
+   "default": "30",
+   "description": "A submission left in Transcribing or Scoring longer than this is treated as abandoned by a dead worker and re-queued. Must stay well above the real processing time, or a slow run is mistaken for a dead one.",
+   "fieldname": "speaking_stale_after_minutes",
+   "fieldtype": "Int",
+   "label": "Re-queue Stalled Submissions After (minutes)"
   },
   {
    "fieldname": "limits_section",

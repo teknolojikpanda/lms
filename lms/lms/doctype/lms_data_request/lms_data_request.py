@@ -32,8 +32,12 @@ class LMSDataRequest(Document):
 		self.validate_subject()
 
 	def validate_subject(self):
-		if self.subject_user in ("Administrator", "Guest"):
-			frappe.throw(_("System accounts cannot be the subject of a data request."))
+		# Scoped to Erasure deliberately. Anonymising Administrator would
+		# break the site, but *exporting* what a system account holds is
+		# harmless — and blocking it stopped an admin from using the
+		# self-service export at all, which the staging run surfaced.
+		if self.request_type == "Erasure" and self.subject_user in ("Administrator", "Guest"):
+			frappe.throw(_("System accounts cannot be erased."))
 
 	def on_trash(self):
 		# The request *is* the audit record for an irreversible action.
