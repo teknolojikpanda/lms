@@ -27,6 +27,8 @@ from lms.lms.language_platform.privacy_rules import (
 	build_export_payload,
 	user_scrub_values,
 )
+from lms.lms.language_platform.search import remove_document as remove_from_search_index
+from lms.lms.language_platform.search_rules import SEARCH_SOURCES
 
 
 # --- Export ---------------------------------------------------------------
@@ -93,8 +95,15 @@ def anonymize_user(user: str) -> dict:
 		if not names:
 			continue
 
+		# Erasure has to reach every copy, and the search index is a copy.
+		# Removing it here rather than relying on doc_events also covers the
+		# scrub case, which updates columns without firing a delete.
+		searchable = doctype in SEARCH_SOURCES
+
 		if source.get("purge"):
 			for name in names:
+				if searchable:
+					remove_from_search_index(doctype, name)
 				frappe.delete_doc(doctype, name, ignore_permissions=True, delete_permanently=True)
 			summary[f"{doctype} (deleted)"] = len(names)
 			continue
@@ -102,6 +111,8 @@ def anonymize_user(user: str) -> dict:
 		if scrub := source.get("scrub"):
 			for name in names:
 				frappe.db.set_value(doctype, name, scrub, update_modified=False)
+				if searchable:
+					remove_from_search_index(doctype, name)
 			summary[f"{doctype} (scrubbed)"] = len(names)
 		else:
 			summary[f"{doctype} (retained, pseudonymous)"] = len(names)

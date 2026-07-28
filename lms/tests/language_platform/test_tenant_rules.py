@@ -12,15 +12,22 @@ Pure tests — no Frappe site required:
 """
 
 import unittest
+from datetime import datetime, timedelta
 
 from lms.lms.language_platform.tenant_rules import (
+	DEFAULT_GRACE_DAYS,
 	RESERVED_SUBDOMAINS,
+	PurgeNotAllowed,
 	TenantNameError,
 	build_site_name,
+	check_purge_preconditions,
 	check_seat_capacity,
 	normalize_roster_row,
 	parse_roster,
+	purge_after_date,
+	purge_eligibility,
 	seats_available,
+	validate_purge_confirmation,
 	validate_roster_row,
 	validate_subdomain,
 )
@@ -196,6 +203,120 @@ class TestRosterParsing(unittest.TestCase):
 	def test_empty_roster(self):
 		self.assertEqual(parse_roster([]), ([], []))
 		self.assertEqual(parse_roster(None), ([], []))
+
+
+class TestPurgeEligibility(unittest.TestCase):
+	NOW = datetime(2026, 7, 26, 12, 0, 0)
+
+	def test_purge_after_adds_the_grace_period(self):
+		archived = datetime(2026, 1, 1)
+		self.assertEqual(purge_after_date(archived, 90), datetime(2026, 4, 1))
+
+	def test_not_eligible_during_grace(self):
+		archived = self.NOW - timedelta(days=10)
+		result = purge_eligibility(archived, 90, self.NOW)
+		self.assertFalse(result["eligible"])
+		self.assertEqual(result["days_remaining"], 80)
+
+	def test_eligible_after_grace(self):
+		archived = self.NOW - timedelta(days=91)
+		self.assertTrue(purge_eligibility(archived, 90, self.NOW)["eligible"])
+
+	def test_boundary_exactly_at_expiry(self):
+		archived = self.NOW - timedelta(days=90)
+		self.assertTrue(purge_eligibility(archived, 90, self.NOW)["eligible"])
+
+	def test_partial_day_still_waits(self):
+		# 89.5 days elapsed must not round down into eligibility.
+		archived = self.NOW - timedelta(days=89, hours=12)
+		result = purge_eligibility(archived, 90, self.NOW)
+		self.assertFalse(result["eligible"])
+		self.assertEqual(result["days_remaining"], 1)
+
+	def test_unarchived_tenant_is_never_eligible(self):
+		result = purge_eligibility(None, 90, self.NOW)
+		self.assertFalse(result["eligible"])
+		self.assertIn("not archived", result["reason"])
+
+	def test_zero_grace_is_immediately_eligible(self):
+		# Supported for test fixtures, but the default is 90 days.
+		self.assertTrue(purge_eligibility(self.NOW, 0, self.NOW)["eligible"])
+
+	def test_default_grace_is_ninety_days(self):
+		self.assertEqual(DEFAULT_GRACE_DAYS, 90)
+
+
+class TestPurgeConfirmation(unittest.TestCase):
+	def test_exact_match_accepted(self):
+		validate_purge_confirmation("ankara-koleji", "ankara-koleji")
+
+	def test_whitespace_tolerated(self):
+		validate_purge_confirmation("  ankara-koleji  ", "ankara-koleji")
+
+	def test_mismatch_rejected(self):
+		for typed in ("ankara", "Ankara-Koleji", "ankara-kolej", "", "yes"):
+			with self.assertRaises(PurgeNotAllowed, msg=f"accepted {typed!r}"):
+				validate_purge_confirmation(typed, "ankara-koleji")
+
+	def test_non_string_rejected(self):
+		for typed in (None, 123, True):
+			with self.assertRaises(PurgeNotAllowed):
+				validate_purge_confirmation(typed, "ankara-koleji")
+
+
+class TestPurgePreconditions(unittest.TestCase):
+	NOW = datetime(2026, 7, 26, 12, 0, 0)
+
+	def _args(self, **overrides):
+		args = {
+			"status": "Archived",
+			"archived_at": self.NOW - timedelta(days=100),
+			"backup_verified": True,
+			"export_location": "s3://exports/ankara-koleji-2026-04-01.tar.gz",
+			"grace_days": 90,
+			"now": self.NOW,
+		}
+		args.update(overrides)
+		return args
+
+	def test_all_guards_satisfied(self):
+		check_purge_preconditions(**self._args())  # must not raise
+
+	def test_active_tenant_cannot_be_purged(self):
+		with self.assertRaises(PurgeNotAllowed) as ctx:
+			check_purge_preconditions(**self._args(status="Active"))
+		self.assertIn("Archive it first", str(ctx.exception))
+
+	def test_suspended_tenant_cannot_be_purged(self):
+		with self.assertRaises(PurgeNotAllowed):
+			check_purge_preconditions(**self._args(status="Suspended"))
+
+	def test_missing_export_blocks_purge(self):
+		# The institution's data must be returned before it is destroyed.
+		with self.assertRaises(PurgeNotAllowed) as ctx:
+			check_purge_preconditions(**self._args(export_location=None))
+		self.assertIn("returned before deletion", str(ctx.exception))
+
+	def test_unverified_backup_blocks_purge(self):
+		with self.assertRaises(PurgeNotAllowed) as ctx:
+			check_purge_preconditions(**self._args(backup_verified=False))
+		self.assertIn("unrecoverable", str(ctx.exception))
+
+	def test_grace_period_blocks_purge(self):
+		with self.assertRaises(PurgeNotAllowed) as ctx:
+			check_purge_preconditions(**self._args(archived_at=self.NOW - timedelta(days=5)))
+		self.assertIn("Grace period", str(ctx.exception))
+
+	def test_guards_are_not_individually_bypassable(self):
+		# Satisfying three of four must still refuse.
+		for override in (
+			{"status": "Active"},
+			{"export_location": None},
+			{"backup_verified": False},
+			{"archived_at": self.NOW},
+		):
+			with self.assertRaises(PurgeNotAllowed, msg=f"passed with {override}"):
+				check_purge_preconditions(**self._args(**override))
 
 
 if __name__ == "__main__":

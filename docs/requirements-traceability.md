@@ -5,7 +5,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 
 | § | Requirement | Status | Where |
 |---|---|---|---|
-| 1.1 | B2B multi-tenant, tenant isolation | 🔨 | Tenant = Frappe site (ADR-0001). `LMS Tenant` registry + lifecycle APIs (owner portal) and `provisioning/provision_tenant.py` CLI (site create/suspend/resume). Privileged step deliberately kept off the request path |
+| 1.1 | B2B multi-tenant, tenant isolation | 🔨 | Tenant = Frappe site (ADR-0001). `LMS Tenant` registry + lifecycle APIs (owner portal) and `provisioning/provision_tenant.py` CLI (create/suspend/resume/archive/purge). Privileged step deliberately kept off the request path. Offboarding separates reversible **Archived** from terminal **Purged** with a 90-day grace period and four guards (archived status, data export recorded, backup verified, grace elapsed) |
 | 1.3 | Onboarding: 1 institution, 10 classes, 500 students in a day | 🔨 | CSV roster import (`tenant_setup.import_roster_csv`) creating students + classes with per-row error reporting and seat-limit enforcement; runbook in `docs/tenant-onboarding-runbook.md` |
 | 3.1 | 4-role hierarchy | ✅ | Role mapping in ADR-0001 (Moderator / Course Creator / Batch Evaluator / LMS Student) |
 | 3.2 | Separate portal URLs | ✅/⏭️ | SPA route groups per role; subdomain per tenant 🏗️ |
@@ -28,7 +28,9 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 6.3 | Accessibility: 6 font steps, whiteboard mode, WCAG AA | ⏭️ | frontend increment (CSS vars exist in frappe-ui theme) |
 | 6.4 | KVKK: retention, audit log, encryption | 🔨/🏗️ | `track_changes` on all new doctypes + override audit comments; Ek-2 retention purge jobs (audio 30d, transcripts 1y, exam results 2y — all configurable, 0 = keep forever) in `retention.py` 🔨; S3/KMS 🏗️ |
 | 7.3 | API error envelope + correlationId | 🔨 | `lms/lms/language_platform/envelope.py` decorator used by module APIs |
-| 8.x | AWS infra (VPC, ECS, CloudFront, S3, …) | 🔨 | **`dil-platformu-infra`** repo: 9 Terraform modules (network, data, compute, edge, media, ai, security, observability, finops) + bootstrap + dev/prod roots; `terraform validate` green. Remaining: AWS Organizations/SCP (§8.6), MediaPackage DRM, DR replication |
+| 8.x | AWS infra (VPC, ECS, CloudFront, S3, …) | 🔨 | **`dil-platformu-infra`** repo: 10 Terraform modules (network, data, compute, edge, media, ai, security, observability, finops, search) + bootstrap + dev/prod roots; `terraform validate` green. Remaining: MediaPackage DRM, DR replication |
+| 8.6 | Accounts, environments, Organizations (MUST) | 🔨 | `organization/` root: OU structure (Workloads/NonProduction+Production, Security, Sandbox), 5 guardrail SCPs (audit-service protection, S3 public block, KMS protection, region restriction, prod hardening incl. root-user denial), IAM Identity Center permission sets. **SCP enforcement off by default** with break-glass exemptions and a staged rollout procedure |
+| 8.10 | Search: MVP DB full-text → OpenSearch at scale | 🔨 | `search_rules.py` (policy: field whitelist, per-site index naming, access rules) + `search_providers.py` (Database default / OpenSearch) + `search.py` (RBAC-enforced API, incremental indexing, nightly reindex). Question **answer keys are never indexed**; transcript index entries are dropped by both retention and DSAR erasure. Infra: `modules/search` (disabled by default) |
 | 9.1 | Input validation, RBAC, rate limits | ✅/🔨 | Frappe schema validation + role perms; per-endpoint checks in new APIs; `rate_limit` on placement start/submit/autosave, speaking upload, overlay writes and all score overrides 🔨 |
 | 9.2 | KVKK technical rights (DSAR) | 🔨 | `LMS Data Request` (Export/Erasure, Pending→Approved→Completed, four-eyes gate: erasure cannot be self-approved) + `dsar.py` / `privacy_rules.py`. Export = full JSON of everything stored about the person; erasure = anonymise (academic records kept pseudonymously per "zorunlu saklama", personal free text deleted, speaking audio destroyed immediately). Self-service export for students. **Residual flagged for legal review:** the login identifier persists in `owner`/`modified_by` columns — documented in `dsar._scrub_user_record` |
 | 6.6 | Load and performance tests | 🔨 | `load-tests/` k6 suite: exam start (1000 VU stampede, p95<800ms), exam taking (autosave p95<300ms), API CRUD, VOD cache hit ratio >85%, speaking time-to-score <5min — all as enforced thresholds, plus seed script and README. Player stability: `cypress/e2e/video_player_soak.cy.js` (heap-growth leak detection with forced GC, seek/replay/speed cycles, control responsiveness). Real-time HLS/ABR soak still manual |
@@ -49,6 +51,11 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
    export/erasure with approval workflow, Ek-2 retention purge jobs.
 5. **Load tests (done):** k6 suite in `load-tests/` with §6.2 thresholds as pass/fail gates.
 6. **Provisioning (done):** tenant registry, provisioning CLI, roster import, runbook.
-7. **Remaining:** run the load + soak suites against staging to record baseline numbers,
-   real-time HLS/ABR player soak, OpenSearch for question/transcript search at scale
-   (§8.10), AWS Organizations/SCP (§8.6), tenant archival/offboarding automation.
+7. **Search (done):** provider split with the OpenSearch path behind a setting.
+8. **Organizations (done):** OUs, guardrail SCPs (unenforced pending staged rollout),
+   Identity Center permission sets.
+9. **Offboarding (done):** archive/restore/purge with grace period and guards.
+10. **Remaining — all require a running environment or are Enterprise options:**
+    run the load + soak suites against staging to record baseline numbers, real-time
+    HLS/ABR player soak, staged SCP enforcement (Sandbox → NonProd → Prod), and the
+    Enterprise-package items MediaPackage DRM and DR region replication.

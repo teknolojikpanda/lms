@@ -17,6 +17,7 @@ unit-testable without a site.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
 
 # --- Subdomain / site naming -------------------------------------------------
 
@@ -141,6 +142,110 @@ def check_seat_capacity(seat_limit: int, active_students: int, adding: int) -> N
 			f"Seat limit exceeded: {available} seat(s) available, {adding} requested. "
 			"Increase the plan's seat limit before importing."
 		)
+
+
+# --- Archival and offboarding ---------------------------------------------------
+#
+# Offboarding separates two things that are usually conflated:
+#
+#   Archived — the site is backed up and offline, and can be brought back.
+#   Purged   — the site is gone. There is no undo beyond restoring the
+#              backup into a fresh site, which is a different operation
+#              with a different runbook.
+#
+# The grace period between them exists because offboarding decisions get
+# reversed: contracts get renewed, the wrong tenant gets named, a bursar
+# resolves a payment dispute. Deleting on the day of the request removes
+# the chance to notice.
+
+DEFAULT_GRACE_DAYS = 90
+
+
+class PurgeNotAllowed(Exception):
+	"""Raised when a purge is attempted before its guards are satisfied."""
+
+
+def purge_after_date(archived_at: datetime, grace_days: int = DEFAULT_GRACE_DAYS) -> datetime:
+	"""Earliest moment a tenant may be purged."""
+	if not isinstance(archived_at, datetime):
+		raise ValueError("archived_at must be a datetime.")
+	return archived_at + timedelta(days=max(0, int(grace_days)))
+
+
+def purge_eligibility(
+	archived_at: datetime | None,
+	grace_days: int = DEFAULT_GRACE_DAYS,
+	now: datetime | None = None,
+) -> dict:
+	"""Report whether the grace period has elapsed, and how much remains.
+
+	Returns a dict rather than a bool so callers can *show* the operator
+	how long is left instead of only refusing.
+	"""
+	if archived_at is None:
+		return {"eligible": False, "days_remaining": None, "reason": "Tenant is not archived."}
+
+	now = now or datetime.now()
+	purge_at = purge_after_date(archived_at, grace_days)
+	remaining = (purge_at - now).total_seconds() / 86400
+
+	if remaining > 0:
+		return {
+			"eligible": False,
+			"days_remaining": max(1, int(remaining + 0.999)),  # round up: partial day still waits
+			"purge_after": purge_at,
+			"reason": f"Grace period ends {purge_at:%Y-%m-%d}.",
+		}
+
+	return {"eligible": True, "days_remaining": 0, "purge_after": purge_at, "reason": None}
+
+
+def validate_purge_confirmation(typed_value: str, subdomain: str) -> None:
+	"""Require the operator to type the subdomain exactly.
+
+	Copied from how hosting providers gate repository deletion: the point
+	is not authentication (that already happened) but interrupting
+	autopilot. Someone who types the name has read which tenant they are
+	about to destroy.
+	"""
+	if not isinstance(typed_value, str) or typed_value.strip() != (subdomain or "").strip():
+		raise PurgeNotAllowed(
+			f"Confirmation does not match. Type the subdomain exactly: {subdomain}"
+		)
+
+
+def check_purge_preconditions(
+	status: str,
+	archived_at: datetime | None,
+	backup_verified: bool,
+	export_location: str | None,
+	grace_days: int = DEFAULT_GRACE_DAYS,
+	now: datetime | None = None,
+) -> None:
+	"""Every guard that must hold before a site may be destroyed.
+
+	Collected in one pure function so the rules are testable and so no
+	caller can satisfy three of the four and proceed.
+	"""
+	if status != "Archived":
+		raise PurgeNotAllowed(
+			f"Only archived tenants can be purged; this one is '{status}'. Archive it first."
+		)
+
+	if not export_location:
+		raise PurgeNotAllowed(
+			"No data export recorded. The institution's data must be returned before deletion."
+		)
+
+	if not backup_verified:
+		raise PurgeNotAllowed(
+			"Backup has not been verified. Purging without a checked backup makes the "
+			"deletion unrecoverable."
+		)
+
+	eligibility = purge_eligibility(archived_at, grace_days, now)
+	if not eligibility["eligible"]:
+		raise PurgeNotAllowed(eligibility["reason"])
 
 
 # --- Roster import ------------------------------------------------------------

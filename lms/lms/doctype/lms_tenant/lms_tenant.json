@@ -25,7 +25,15 @@
   "contact_phone",
   "section_break_ops",
   "provisioned_at",
-  "provisioning_notes"
+  "provisioning_notes",
+  "section_break_archival",
+  "archived_at",
+  "archival_reason",
+  "purge_after",
+  "column_break_archival",
+  "export_location",
+  "backup_verified",
+  "purged_at"
  ],
  "fields": [
   {
@@ -62,7 +70,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Requested\nProvisioning\nActive\nSuspended\nArchived",
+   "options": "Requested\nProvisioning\nActive\nSuspended\nArchived\nPurged",
    "read_only": 1,
    "reqd": 1
   },
@@ -164,6 +172,57 @@
    "fieldname": "provisioning_notes",
    "fieldtype": "Small Text",
    "label": "Provisioning Notes",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:['Archived','Purged'].includes(doc.status)",
+   "fieldname": "section_break_archival",
+   "fieldtype": "Section Break",
+   "label": "Archival and Offboarding"
+  },
+  {
+   "fieldname": "archived_at",
+   "fieldtype": "Datetime",
+   "label": "Archived At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "archival_reason",
+   "fieldtype": "Small Text",
+   "label": "Archival Reason",
+   "read_only": 1
+  },
+  {
+   "description": "Earliest date the site may be permanently destroyed. Until then the tenant can be restored.",
+   "fieldname": "purge_after",
+   "fieldtype": "Date",
+   "label": "Purge Allowed After",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_archival",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Where the institution's data export was delivered. Purging is refused until this is recorded.",
+   "fieldname": "export_location",
+   "fieldtype": "Data",
+   "label": "Data Export Location",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Set by the archival CLI once the backup artefacts were checked to exist and be non-empty.",
+   "fieldname": "backup_verified",
+   "fieldtype": "Check",
+   "label": "Backup Verified",
+   "read_only": 1
+  },
+  {
+   "fieldname": "purged_at",
+   "fieldtype": "Datetime",
+   "label": "Purged At",
    "read_only": 1
   }
  ],
