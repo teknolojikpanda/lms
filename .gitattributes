@@ -1,0 +1,14 @@
+# Shell scripts must keep LF endings even when checked out on Windows.
+#
+# git stores LF, but a Windows checkout with core.autocrlf=true rewrites
+# the working tree to CRLF. docker/init-staging.sh is bind-mounted into a
+# Linux container and run by bash, which reads the trailing \r as part of
+# each command:
+#
+#     init-staging.sh: line 7: set: -: invalid option
+#     init-staging.sh: line 8: $'\r': command not found
+#     init-staging.sh: line 98: syntax error: unexpected end of file
+#
+# The bench then never starts, and the failure names a line that looks
+# fine in an editor. Anything executed inside a container belongs here.
+*.sh text eol=lf
