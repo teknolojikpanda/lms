@@ -8,8 +8,10 @@
 #   docker compose -f docker-compose.staging.yml up -d
 #   docker compose -f docker-compose.staging.yml logs -f frappe
 #
-# The bench lives in a named volume so a restart does not re-download
-# frappe, node modules and the rest of a first-run bench init.
+# The bench lives in the frappe container's own filesystem, NOT a volume
+# (see the volumes note on that service for why). So `stop` and `start`
+# preserve it, while `down` removes the container and takes the bench
+# with it — the next `up` repeats the whole first-run init.
 name: lms-staging
 
 services:
