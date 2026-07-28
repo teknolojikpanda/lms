@@ -44,6 +44,40 @@ state it mutates on entry, because otherwise a second run reports
 ordering artefacts as failures — which is exactly what happened the first
 time.
 
+### Removing the fixtures afterwards
+
+The run seeds a course tree, a question bank, placement and speaking
+records, a tenant, a roster and DSAR requests, and leaves them on the
+site. `cleanup` removes all of it and puts the settings the run mutates
+back to their shipped defaults:
+
+```bash
+docker exec -w /home/frappe/frappe-bench lms-staging-frappe-1 \
+  bench --site staging.localhost execute \
+  lms.lms.language_platform.staging_smoke.cleanup
+```
+
+It re-counts every marker afterwards, so anything that refuses deletion
+is reported rather than assumed gone. Two things survive by default and
+are reported as still present:
+
+- **Processed `LMS Data Request` records.** Their `on_trash` guard
+  protects them as the KVKV audit trail.
+- **`Error Log` entries.** The run generates them (attach failures and
+  password notifications — expected with no SMTP and no real audio
+  offline), but the log is also where real defects surface: a
+  speaking-pipeline failure handler that saves a stale document was
+  found only by reading it.
+
+Read those before overriding, then, on a disposable bench only:
+
+```bash
+docker exec -w /home/frappe/frappe-bench lms-staging-frappe-1 \
+  bench --site staging.localhost execute \
+  lms.lms.language_platform.staging_smoke.cleanup \
+  --kwargs "{'include_audit_records': True, 'clear_error_logs': True}"
+```
+
 ## Notes that cost time to discover
 
 - **MariaDB healthcheck** must pass credentials. `healthcheck.sh
