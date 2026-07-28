@@ -20,6 +20,21 @@ export default defineConfig({
 			if (process.env.CYPRESS_CLOUD_PARALLEL !== "1") {
 				cypressSplit(on, config);
 			}
+
+			// The video player soak test measures JS heap growth to catch leaks.
+			// Without these flags performance.memory is bucketed to ~5 MB (too
+			// coarse to see a slow leak) and there is no way to force a
+			// collection, so "growth" would just be uncollected garbage.
+			// Chromium-only and otherwise inert, so every other spec is
+			// unaffected.
+			on("before:browser:launch", (browser = {}, launchOptions) => {
+				if (browser.family === "chromium" && browser.name !== "electron") {
+					launchOptions.args.push("--enable-precise-memory-info");
+					launchOptions.args.push("--js-flags=--expose-gc");
+				}
+				return launchOptions;
+			});
+
 			return config;
 		},
 	},

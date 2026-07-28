@@ -17,8 +17,9 @@ import frappe
 from lms.lms.doctype.lms_data_request import lms_data_request as data_request
 from lms.lms.doctype.lms_placement_attempt import lms_placement_attempt as placement
 from lms.lms.doctype.lms_speaking_submission import lms_speaking_submission as speaking
+from lms.lms.doctype.lms_tenant import lms_tenant as tenant
 from lms.lms.doctype.lms_video_overlay import lms_video_overlay as overlay
-from lms.lms.language_platform import admin_api
+from lms.lms.language_platform import admin_api, tenant_setup
 from lms.lms.language_platform.envelope import envelope
 
 
@@ -128,3 +129,49 @@ def reject_data_request(request: str, reason: str):
 @envelope
 def export_my_data():
 	return data_request.export_my_data()
+
+
+@frappe.whitelist()
+@envelope
+def register_tenant(
+	tenant_name: str,
+	subdomain: str,
+	tenant_type: str = "Dershane",
+	plan: str = "Pilot",
+	seat_limit: int = 500,
+	contact_person: str | None = None,
+	contact_email: str | None = None,
+):
+	return tenant.register_tenant(
+		tenant_name, subdomain, tenant_type, plan, seat_limit, contact_person, contact_email
+	)
+
+
+@frappe.whitelist()
+@envelope
+def get_tenants():
+	return tenant.get_tenants()
+
+
+@frappe.whitelist()
+@envelope
+def suspend_tenant(tenant_name: str, reason: str):
+	return tenant.suspend_tenant(tenant_name, reason)
+
+
+@frappe.whitelist()
+@envelope
+def activate_tenant(tenant_name: str):
+	return tenant.activate_tenant(tenant_name)
+
+
+@frappe.whitelist()
+@envelope
+def check_tenant_capacity(tenant_name: str, adding: int):
+	return tenant.check_tenant_capacity(tenant_name, adding)
+
+
+@frappe.whitelist()
+@envelope
+def import_roster_csv(csv_content: str):
+	return tenant_setup.import_roster_csv(csv_content)

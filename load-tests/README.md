@@ -121,11 +121,61 @@ is billed as both an origin request and origin transfer. A ratio below
 85% on a warm cache usually means the cache key includes something it
 should not (a varying query string or forwarded header).
 
-## What is not covered here
+## Player stability soak (§6.6)
 
-- **Player stability soak** (§6.6 "video player icin stabilite testleri")
-  needs a real browser over hours; k6 measures the delivery path, not
-  playback. Use the Cypress suite or a manual soak for the player itself.
+k6 measures the delivery path; player stability needs a real browser, so
+that half of §6.6 lives in Cypress:
+
+```bash
+yarn cypress run --browser chrome --spec cypress/e2e/video_player_soak.cy.js
+```
+
+**Chrome, not Electron.** The spec reads `performance.memory` and forces
+a collection through `--expose-gc`; both flags are added for Chromium in
+`cypress.config.js`, and the spec fails fast with a clear message if it
+finds itself somewhere without them.
+
+It seeds its own course/chapter/lesson through the API and drives
+`timeupdate` directly rather than waiting for real playback — one minute
+of wall clock reproduces the tick volume of a long viewing session, which
+is what actually stresses the overlay handler hooked into that event.
+Between cycles it mixes in seeks, replays and speed changes, then samples
+the heap.
+
+| Env | Default | Purpose |
+|---|---|---|
+| `SOAK_CYCLES` | 20 | playback cycles (CI short run; use 200+ nightly) |
+| `SOAK_TICKS_PER_CYCLE` | 240 | timeupdate events per cycle (240 = 1 min at 4 Hz) |
+| `SOAK_HEAP_GROWTH_MB` | 25 | heap growth allowed before failing |
+| `SOAK_VIDEO_URL` | `/files/sample-lesson.mp4` | fixture video the lesson points at |
+
+```bash
+yarn cypress run --browser chrome \
+  --spec cypress/e2e/video_player_soak.cy.js \
+  --env SOAK_CYCLES=200,SOAK_VIDEO_URL=/files/my-sample.mp4
+```
+
+**You must supply a video.** The fixture lesson points at
+`SOAK_VIDEO_URL`; if that file does not exist on the site the player has
+nothing to load and the spec fails on `readyState`. Any small MP4 already
+uploaded to the site works.
+
+Reading the result: the spec asserts both **absolute** growth (under the
+MB limit) and that growth is **decelerating**. The second matters more —
+caches filling and settling produce growth that plateaus, whereas a leaked
+listener or timer produces growth that never does, which is why the two
+halves of the run are compared rather than just the endpoints.
+
+### What this does not cover
+
+Driving `timeupdate` synthetically stresses the player's own logic
+faithfully, but it bypasses the decoder, the network stack and ABR
+quality switching. A genuine multi-hour real-time soak against a live HLS
+stream is still worth running before a large rollout — this catches the
+leak class, not codec or bandwidth-adaptation problems.
+
+## Also not covered here
+
 - **Exam integrity under concurrency** (deterministic selection, no
   duplicates) is covered by unit tests in `lms/tests/language_platform/`,
   not here.
