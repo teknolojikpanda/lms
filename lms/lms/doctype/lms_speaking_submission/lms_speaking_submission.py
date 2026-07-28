@@ -10,6 +10,7 @@ final word per §6.7).
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.rate_limiter import rate_limit
 from frappe.utils import get_datetime, now_datetime
 
 from lms.lms.language_platform.speaking_pipeline import enqueue_processing
@@ -117,8 +118,13 @@ def _marshal(doc, include_transcript: bool = True) -> dict:
 
 
 @frappe.whitelist()
+@rate_limit(limit=60, seconds=60 * 60)
 def create_speaking_submission(prompt: str, audio_file: str, duration_seconds: float) -> dict:
-	"""Student entry point: register the uploaded recording and start the pipeline."""
+	"""Student entry point: register the uploaded recording and start the pipeline.
+
+	Rate limited on top of the per-tenant daily minute quota (§8.13): the
+	quota caps cost, this caps request volume against the AI pipeline.
+	"""
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Please login to submit a recording."), frappe.PermissionError)
 
@@ -178,6 +184,7 @@ def get_grading_queue() -> list[dict]:
 
 
 @frappe.whitelist()
+@rate_limit(limit=300, seconds=60 * 60)
 def override_speaking_score(submission: str, final_score: float, reason: str) -> dict:
 	"""Teacher override: final_score is updated, original AI score preserved (§4.9.2)."""
 	if not _can_grade():

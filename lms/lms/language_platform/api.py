@@ -14,6 +14,7 @@ wrappers only add the response contract.
 
 import frappe
 
+from lms.lms.doctype.lms_data_request import lms_data_request as data_request
 from lms.lms.doctype.lms_placement_attempt import lms_placement_attempt as placement
 from lms.lms.doctype.lms_speaking_submission import lms_speaking_submission as speaking
 from lms.lms.doctype.lms_video_overlay import lms_video_overlay as overlay
@@ -103,3 +104,27 @@ def get_admin_dashboard():
 @envelope
 def get_owner_dashboard():
 	return admin_api.get_owner_dashboard()
+
+
+@frappe.whitelist()
+@envelope
+def create_data_request(subject_user: str, request_type: str, reason: str):
+	return data_request.create_data_request(subject_user, request_type, reason)
+
+
+@frappe.whitelist()
+@envelope
+def approve_data_request(request: str):
+	return data_request.approve_data_request(request)
+
+
+@frappe.whitelist()
+@envelope
+def reject_data_request(request: str, reason: str):
+	return data_request.reject_data_request(request, reason)
+
+
+@frappe.whitelist()
+@envelope
+def export_my_data():
+	return data_request.export_my_data()
