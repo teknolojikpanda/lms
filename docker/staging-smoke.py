@@ -18,6 +18,7 @@ rather than the first one.
 """
 
 import json
+import time
 import traceback
 
 import frappe
@@ -725,6 +726,25 @@ def _overlays():
 # --- speaking ---------------------------------------------------------------------
 
 
+def _await_terminal(submission_name, timeout=90):
+	"""Wait for the speaking pipeline to settle, whichever worker runs it.
+
+	`frappe.db.commit()` before each read is load-bearing, not tidiness:
+	under REPEATABLE READ this connection keeps the snapshot it opened, so
+	without ending the transaction the loop re-reads its own stale view and
+	never sees the worker's committed writes.
+	"""
+	deadline = time.monotonic() + timeout
+	while time.monotonic() < deadline:
+		frappe.db.commit()
+		status = frappe.db.get_value("LMS Speaking Submission", submission_name, "status")
+		if status in ("Ready", "Failed"):
+			return status
+		time.sleep(0.5)
+	frappe.db.commit()
+	return frappe.db.get_value("LMS Speaking Submission", submission_name, "status")
+
+
 def _speaking():
 	print("[speaking]")
 
@@ -778,17 +798,22 @@ def _speaking():
 				"duration_seconds": 60,
 			}
 		)
-		# flags.in_test would skip enqueue; call the pipeline directly so the
-		# state machine is exercised synchronously.
 		doc.flags.ignore_permissions = True
 		doc.insert(ignore_permissions=True)
 		frappe.db.commit()
 		STATE["submission"] = doc.name
 
+		# `after_insert` already enqueued the job, so a worker may be on this
+		# submission. Call the pipeline here too — whichever caller wins the
+		# claim does the work and the other returns immediately — then wait
+		# for the winner rather than assuming it was this one. Asserting
+		# straight after the call used to pass only because both callers ran
+		# concurrently, which is the race the claim now prevents.
 		process_submission(doc.name)
+		status = _await_terminal(doc.name)
 		doc.reload()
-		if doc.status != "Ready":
-			raise AssertionError(f"status {doc.status}, error: {doc.error_message}")
+		if status != "Ready":
+			raise AssertionError(f"status {status}, error: {doc.error_message}")
 		if not doc.rubric_scores:
 			raise AssertionError("no rubric scores produced")
 		return (
