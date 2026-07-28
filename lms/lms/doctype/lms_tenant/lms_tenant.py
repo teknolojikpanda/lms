@@ -236,7 +236,12 @@ def archive_tenant(tenant: str, reason: str, grace_days: int = DEFAULT_GRACE_DAY
 
 	doc.archived_at = archived_at
 	doc.archival_reason = reason.strip()
-	doc.purge_after = purge_after_date(archived_at, grace_days).date()
+	# Persist the grace period actually granted, not just the date it
+	# produces. Every later check recomputes eligibility, and recomputing
+	# with the *default* silently discards an override — a tenant archived
+	# with 7 days would still be refused for 90.
+	doc.grace_days = max(0, int(grace_days))
+	doc.purge_after = purge_after_date(archived_at, doc.grace_days).date()
 	doc.transition_to("Archived", reason.strip())
 
 	return {
@@ -262,6 +267,7 @@ def restore_tenant(tenant: str) -> dict:
 
 	doc.archived_at = None
 	doc.purge_after = None
+	doc.grace_days = None
 	doc.transition_to("Active")
 
 	return {
@@ -286,7 +292,7 @@ def get_purge_readiness(tenant: str) -> dict:
 
 	eligibility = purge_eligibility(
 		get_datetime(doc.archived_at) if doc.archived_at else None,
-		DEFAULT_GRACE_DAYS,
+		_effective_grace_days(doc),
 	)
 
 	blockers = []
@@ -321,12 +327,45 @@ def record_archival_artifacts(subdomain: str, export_location: str, backup_verif
 	)
 
 
+def _effective_grace_days(doc) -> int:
+	"""The grace period this tenant was archived under.
+
+	Falls back to the default for tenants archived before the period was
+	persisted, which matches what those archivals were judged against.
+	"""
+	return int(doc.grace_days) if doc.grace_days else DEFAULT_GRACE_DAYS
+
+
+def assert_purge_allowed(subdomain: str) -> dict:
+	"""Throw unless every purge guard is satisfied. Changes nothing.
+
+	Exists so the purge CLI can be refused *before* it destroys the site.
+	`mark_purged` runs the same checks, but it only runs after deletion —
+	on its own it can refuse to record a purge that already happened,
+	which is a worse outcome than refusing to start it.
+	"""
+	doc = frappe.get_doc("LMS Tenant", subdomain)
+	try:
+		check_purge_preconditions(
+			status=doc.status,
+			archived_at=get_datetime(doc.archived_at) if doc.archived_at else None,
+			backup_verified=bool(doc.backup_verified),
+			export_location=doc.export_location,
+			grace_days=_effective_grace_days(doc),
+		)
+	except PurgeNotAllowed as e:
+		frappe.throw(str(e), title=_("Purge Refused"))
+	return {"name": doc.name, "subdomain": doc.subdomain, "allowed": True}
+
+
 def mark_purged(subdomain: str, notes: str | None = None):
 	"""Called by the purge CLI after the site has been destroyed.
 
 	Re-checks every precondition rather than trusting the caller: this
 	function is what makes the registry claim a site is gone, and a
-	mistaken claim is as damaging as a mistaken deletion.
+	mistaken claim is as damaging as a mistaken deletion. The CLI also
+	checks *before* deleting — see assert_purge_allowed — so reaching a
+	refusal here means something changed mid-purge.
 	"""
 	doc = frappe.get_doc("LMS Tenant", subdomain)
 
@@ -336,6 +375,7 @@ def mark_purged(subdomain: str, notes: str | None = None):
 			archived_at=get_datetime(doc.archived_at) if doc.archived_at else None,
 			backup_verified=bool(doc.backup_verified),
 			export_location=doc.export_location,
+			grace_days=_effective_grace_days(doc),
 		)
 	except PurgeNotAllowed as e:
 		frappe.throw(str(e), title=_("Purge Refused"))

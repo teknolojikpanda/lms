@@ -602,22 +602,35 @@ def _make_lesson() -> str:
 			.name
 		)
 
-	chapter = frappe.get_doc(
-		{"doctype": "Course Chapter", "title": "[smoke] Chapter", "course": course}
-	).insert(ignore_permissions=True)
+	# Reused rather than recreated: this is called on every run now, and a
+	# fresh chapter and lesson each time would pile up on a bench that is
+	# kept between runs.
+	chapter = frappe.db.get_value("Course Chapter", {"course": course}, "name")
+	if not chapter:
+		chapter = (
+			frappe.get_doc({"doctype": "Course Chapter", "title": "[smoke] Chapter", "course": course})
+			.insert(ignore_permissions=True)
+			.name
+		)
 
-	lesson = frappe.get_doc(
-		{
-			"doctype": "Course Lesson",
-			"title": "[smoke] Lesson",
-			"chapter": chapter.name,
-			"course": course,
-			"content": frappe.as_json({"blocks": []}),
-		}
-	).insert(ignore_permissions=True)
+	lesson = frappe.db.get_value("Course Lesson", {"course": course, "chapter": chapter}, "name")
+	if not lesson:
+		lesson = (
+			frappe.get_doc(
+				{
+					"doctype": "Course Lesson",
+					"title": "[smoke] Lesson",
+					"chapter": chapter,
+					"course": course,
+					"content": frappe.as_json({"blocks": []}),
+				}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
 
 	frappe.db.commit()
-	return lesson.name
+	return lesson
 
 
 def _reset_state():
@@ -647,9 +660,13 @@ def _overlays():
 
 	@check("create a note overlay")
 	def _():
-		# A bare site has no lessons, so make one rather than skipping the
-		# whole overlay section on an empty install.
-		lesson = frappe.db.get_value("Course Lesson", {}, "name") or _make_lesson()
+		# Always use this script's own lesson rather than borrowing whatever
+		# the site happens to hold. Borrowing looked thriftier but picked up
+		# an orphaned lesson left by the upstream test suite — one whose
+		# course had been rolled back — and every overlay check then failed
+		# on `Could not find Course`, which reads like a defect in the
+		# overlay code rather than in the fixture it was handed.
+		lesson = _make_lesson()
 		STATE["lesson"] = lesson
 
 		existing = frappe.db.get_value("LMS Video Overlay", {"lesson": lesson, "type": "Note"})
