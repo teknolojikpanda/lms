@@ -30,6 +30,23 @@
 				:src="fileURL"
 				:type="type"
 			></video>
+			<!--
+				Session watermark (§1.1 copying deterrence): a per-viewer code
+				that makes a screen recording traceable. It moves on a schedule
+				because a mark fixed in one corner is simply cropped out, and
+				it stays inside the picture so a crop that removes it also
+				removes content. pointer-events-none so it can never swallow a
+				click meant for the player, and aria-hidden because it is a
+				deterrent, not information for the viewer.
+			-->
+			<div
+				v-if="watermark.enabled"
+				class="watermark-mark"
+				:style="watermarkStyle"
+				aria-hidden="true"
+			>
+				{{ watermark.display }}
+			</div>
 			<div
 				v-if="!playing"
 				class="absolute inset-0 flex items-center justify-center cursor-pointer"
@@ -188,7 +205,7 @@ import Play from '@/components/Icons/Play.vue'
 import QuizInVideo from '@/components/Modals/QuizInVideo.vue'
 import OverlayPopup from '@/components/Modals/OverlayPopup.vue'
 import { overlayContext } from '@/stores/overlayContext'
-import { getLessonOverlays } from '@/utils/langApi'
+import { getLessonOverlays, getWatermark } from '@/utils/langApi'
 
 const videoRef = ref(null)
 const videoContainer = ref(null)
@@ -203,6 +220,11 @@ const quizLoadTimer = ref(0)
 const currentQuiz = ref(null)
 const nextQuiz = ref({})
 const { settings } = useSettings()
+
+// Session watermark (§1.1). Disabled unless the institution turns it on.
+const watermark = ref({ enabled: false })
+const watermarkIndex = ref(0)
+let watermarkTimer = null
 
 // Timestamped overlays (LMS Video Overlay) for the lesson on screen
 const overlays = ref([])
@@ -254,11 +276,19 @@ onMounted(() => {
 	}
 })
 
+onBeforeUnmount(() => {
+	// The watermark rotation runs on an interval; leaving it behind is
+	// exactly the leak the player soak test looks for.
+	stopWatermark()
+	clearTimeout(floatingNoteTimeout)
+})
+
 watch(
 	() => overlayContext.lesson,
 	async (lesson) => {
 		if (!lesson || !props.readOnly || overlayContext.suspended) {
 			overlays.value = []
+			stopWatermark()
 			return
 		}
 		try {
@@ -268,9 +298,46 @@ watch(
 			// Overlays are an enhancement — never break video playback.
 			overlays.value = []
 		}
+		loadWatermark(lesson)
 	},
 	{ immediate: true }
 )
+
+const loadWatermark = async (lesson) => {
+	try {
+		const config = await getWatermark(lesson)
+		watermark.value = config?.enabled ? config : { enabled: false }
+	} catch {
+		// A failed watermark must not stop the lesson: the institution
+		// loses deterrence for this session, the student loses nothing.
+		watermark.value = { enabled: false }
+	}
+
+	stopWatermark()
+	if (watermark.value.enabled && watermark.value.positions?.length) {
+		watermarkIndex.value = 0
+		watermarkTimer = setInterval(() => {
+			watermarkIndex.value = (watermarkIndex.value + 1) % watermark.value.positions.length
+		}, (watermark.value.move_interval_seconds || 20) * 1000)
+	}
+}
+
+const stopWatermark = () => {
+	if (watermarkTimer) {
+		clearInterval(watermarkTimer)
+		watermarkTimer = null
+	}
+}
+
+const watermarkStyle = computed(() => {
+	const positions = watermark.value.positions || []
+	const position = positions[watermarkIndex.value] || { x: 50, y: 50 }
+	return {
+		left: `${position.x}%`,
+		top: `${position.y}%`,
+		opacity: watermark.value.opacity ?? 0.35,
+	}
+})
 
 const checkOverlays = (timeSeconds) => {
 	if (showOverlayPopup.value || showQuiz.value) return
@@ -475,6 +542,30 @@ const dropdownOptions = computed(() =>
 iframe {
 	width: 100%;
 	min-height: 500px;
+}
+
+/*
+ * Watermark: legible enough to read back off a recording, quiet enough to
+ * watch through. Never interactive, never selectable, and it must survive
+ * fullscreen — hence positioning against the player container rather than
+ * the page.
+ */
+.watermark-mark {
+	position: absolute;
+	z-index: 5;
+	pointer-events: none;
+	user-select: none;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 0.875rem;
+	letter-spacing: 0.08em;
+	color: #fff;
+	/* Outline rather than a solid background: readable over both bright and
+	   dark footage without blocking the picture. */
+	text-shadow:
+		0 0 3px rgba(0, 0, 0, 0.9),
+		0 0 6px rgba(0, 0, 0, 0.7);
+	transition: left 1.2s ease, top 1.2s ease;
+	white-space: nowrap;
 }
 
 .fade-enter-active,

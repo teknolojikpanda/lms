@@ -167,6 +167,7 @@ scheduler_events = {
 		"lms.lms.language_platform.speaking_pipeline.purge_expired_audio",
 		"lms.lms.language_platform.retention.run_retention_jobs",
 		"lms.lms.language_platform.search.nightly_reindex",
+		"lms.lms.language_platform.dr.check_dr_readiness_daily",
 	],
 }
 

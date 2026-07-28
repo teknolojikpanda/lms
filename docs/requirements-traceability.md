@@ -6,6 +6,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | § | Requirement | Status | Where |
 |---|---|---|---|
 | 1.1 | B2B multi-tenant, tenant isolation | 🔨 | Tenant = Frappe site (ADR-0001). `LMS Tenant` registry + lifecycle APIs (owner portal) and `provisioning/provision_tenant.py` CLI (create/suspend/resume/archive/purge). Privileged step deliberately kept off the request path. Offboarding separates reversible **Archived** from terminal **Purged** with a 90-day grace period and four guards (archived status, data export recorded, backup verified, grace elapsed) |
+| 1.1 | Copying deterrence ("kopyalama caydiricilik") | 🔨 | Session watermark: per-viewer opaque code drawn over the player on a moving schedule, `LMS Watermark Session` registry making a leaked recording traceable, moderator-only audited trace API, own retention window. Opaque code rather than the student's email so the overlay discloses no PII to bystanders (§6.4). See `docs/watermarking.md` |
 | 1.3 | Onboarding: 1 institution, 10 classes, 500 students in a day | 🔨 | CSV roster import (`tenant_setup.import_roster_csv`) creating students + classes with per-row error reporting and seat-limit enforcement; runbook in `docs/tenant-onboarding-runbook.md` |
 | 3.1 | 4-role hierarchy | ✅ | Role mapping in ADR-0001 (Moderator / Course Creator / Batch Evaluator / LMS Student) |
 | 3.2 | Separate portal URLs | ✅/⏭️ | SPA route groups per role; subdomain per tenant 🏗️ |
@@ -14,7 +15,7 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 4.3 | Institution → branch → class → student | ✅/⏭️ | LMS Batch (+ enrollment); branch layer ⏭️ |
 | 4.4.1 | Course → unit → lesson hierarchy, CEFR + skill tags | ✅/🔨 | LMS Course/Chapter/Lesson ✅; CEFR metadata on questions 🔨 (`lms_question`) |
 | 4.4.2 | HLS player, subtitles, speed, shortcuts | ✅/🏗️ | Plyr-based video blocks ✅; HLS/ABR + signed cookies 🏗️ |
-| 4.4.3 | Video protection (signed cookies, DRM opt.) | 🏗️ | CloudFront + OAC (infra repo) |
+| 4.4.3 | Video protection (signed cookies, DRM opt.) | 🔨/🏗️ | MVP tier: CloudFront + OAC + signed cookies 🏗️. Enterprise tier: `modules/drm` (MediaPackage VOD + SPEKE) and `drm.py` (entitlement-checked licence proxy, short-lived playback tokens, per-platform DRM selection) — built to the §1.2 procurement boundary; licences, key provider and FairPlay certificate require a vendor contract. Player EME integration deliberately deferred until the vendor is chosen. See `docs/drm-enterprise.md` |
 | 4.5 | **Video overlay (timestamp question/note)** | 🔨 | `LMS Video Overlay`, `LMS Overlay Response` + APIs; rules: timestamp validation, optimistic `version` lock, scope visibility (Global/Course/Batch), question payload via LMS Question. UI: player integration in `VideoBlock.vue` (markers, pause+popup, answers) + teacher editor `VideoOverlayEditor.vue` |
 | 4.6 | **Placement test** (blueprint, score→level mapping, admin override + audit) | 🔨 | `LMS Placement Blueprint` (+segments, +level mapping), `LMS Placement Attempt`, APIs in the doctype controllers. UI: `PlacementTests.vue` + `PlacementAttempt.vue` (timer, autosave, per-skill result) |
 | 4.7.1 | Question types incl. difficulty/duration metadata | ✅/🔨 | LMS Question ✅ + difficulty/level/skill/topic fields 🔨 |
@@ -25,10 +26,12 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 | 4.9.3 | Speaking data privacy (retention, disclosure) | 🔨/🏗️ | Retention days + daily quota in module settings 🔨; S3 lifecycle 🏗️ |
 | 4.10 | FinOps / CUR dashboards | 🔨/🏗️ | Owner dashboard with application-metered cost estimate (Ek-6.3 unit prices, clearly labelled) 🔨; authoritative CUR+Athena feed 🏗️ |
 | 5.1 | Stack (changed by ADR) | 🔨 | `docs/adr/ADR-0001-stack-change-frappe-lms.md` |
+| 6.1 | Uptime, RPO/RTO | 🔨/🏗️ | Multi-AZ by default 🏗️; RPO/RTO measured rather than assumed — `dr_rules.py` evaluates backup freshness against the 15min–1hr target (a missing backup reports *unknown*, never healthy) and breaks the 4-hour RTO into a phase budget, surfaced by `get_dr_readiness` |
 | 6.3 | Accessibility: 6 font steps, whiteboard mode, WCAG AA | ⏭️ | frontend increment (CSS vars exist in frappe-ui theme) |
 | 6.4 | KVKK: retention, audit log, encryption | 🔨/🏗️ | `track_changes` on all new doctypes + override audit comments; Ek-2 retention purge jobs (audio 30d, transcripts 1y, exam results 2y — all configurable, 0 = keep forever) in `retention.py` 🔨; S3/KMS 🏗️ |
 | 7.3 | API error envelope + correlationId | 🔨 | `lms/lms/language_platform/envelope.py` decorator used by module APIs |
 | 8.x | AWS infra (VPC, ECS, CloudFront, S3, …) | 🔨 | **`dil-platformu-infra`** repo: 10 Terraform modules (network, data, compute, edge, media, ai, security, observability, finops, search) + bootstrap + dev/prod roots; `terraform validate` green. Remaining: MediaPackage DRM, DR replication |
+| 8.18 | Backup, DR, business continuity | 🔨 | `modules/dr`: S3 cross-region replication (content-vod, logs) to eu-west-1 with delete markers deliberately **not** replicated, AWS Backup hourly snapshots + cross-region copy, separate DR-region CMK. Pilot-light model. **Restore test (MUST) and annual drill are tracked, not assumed**: `record_restore_test` (a failed test does not reset the clock), `record_dr_drill` (notes mandatory), daily job logging lapses. Runbook: `dil-platformu-infra/docs/dr-runbook.md` |
 | 8.6 | Accounts, environments, Organizations (MUST) | 🔨 | `organization/` root: OU structure (Workloads/NonProduction+Production, Security, Sandbox), 5 guardrail SCPs (audit-service protection, S3 public block, KMS protection, region restriction, prod hardening incl. root-user denial), IAM Identity Center permission sets. **SCP enforcement off by default** with break-glass exemptions and a staged rollout procedure |
 | 8.10 | Search: MVP DB full-text → OpenSearch at scale | 🔨 | `search_rules.py` (policy: field whitelist, per-site index naming, access rules) + `search_providers.py` (Database default / OpenSearch) + `search.py` (RBAC-enforced API, incremental indexing, nightly reindex). Question **answer keys are never indexed**; transcript index entries are dropped by both retention and DSAR erasure. Infra: `modules/search` (disabled by default) |
 | 9.1 | Input validation, RBAC, rate limits | ✅/🔨 | Frappe schema validation + role perms; per-endpoint checks in new APIs; `rate_limit` on placement start/submit/autosave, speaking upload, overlay writes and all score overrides 🔨 |
@@ -55,7 +58,19 @@ Status legend: ✅ exists in frappe/lms · 🔨 implemented in this repo (this i
 8. **Organizations (done):** OUs, guardrail SCPs (unenforced pending staged rollout),
    Identity Center permission sets.
 9. **Offboarding (done):** archive/restore/purge with grace period and guards.
-10. **Remaining — all require a running environment or are Enterprise options:**
-    run the load + soak suites against staging to record baseline numbers, real-time
-    HLS/ABR player soak, staged SCP enforcement (Sandbox → NonProd → Prod), and the
-    Enterprise-package items MediaPackage DRM and DR region replication.
+10. **DRM (done to the procurement boundary):** MediaPackage/SPEKE infra + licence proxy.
+11. **Watermarking (done):** session watermark shipped; forensic marking plumbed to the
+    NexGuard procurement boundary.
+12. **DR (done):** pilot-light replication, RPO/RTO reporting, restore-test and drill tracking.
+
+**Every implementable clause of the agreement now has code behind it.** What remains
+cannot be completed from a development machine — it needs a running environment, a
+commercial purchase, or a scheduled operational exercise:
+
+- run the load + soak suites against staging to record baseline numbers (§6.2, §6.6)
+- real-time HLS/ABR player soak in a browser over hours (§6.6)
+- staged SCP enforcement: Sandbox → NonProduction → Production (§8.6)
+- DRM vendor procurement + player EME integration (§4.4.3, §1.2)
+- NexGuard licence + back-catalogue re-transcode (§4.4.3 Premium)
+- first DR drill and restore test (§8.18 — the tracking is built; the exercise is not)
+- accessibility pass: 6 font steps, whiteboard mode, WCAG 2.1 AA (§6.3)

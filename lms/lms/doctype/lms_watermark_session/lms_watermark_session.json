@@ -1,0 +1,122 @@
+{
+ "actions": [],
+ "autoname": "field:code",
+ "creation": "2026-07-26 10:00:00.000000",
+ "description": "Maps a watermark code seen in leaked footage back to the viewer it was issued to. This is the registry that makes the overlay forensic rather than decorative.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "code",
+  "member",
+  "lesson",
+  "column_break_head",
+  "issued_at",
+  "course",
+  "section_break_context",
+  "ip_address",
+  "column_break_context",
+  "user_agent"
+ ],
+ "fields": [
+  {
+   "description": "The code drawn on the player. Opaque by design: it identifies a session, not a person, so nothing on screen discloses identity.",
+   "fieldname": "code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Watermark Code",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "member",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Viewer",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "lesson",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Lesson",
+   "options": "Course Lesson"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "issued_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Issued At",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "lesson.course",
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Course",
+   "options": "LMS Course",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "description": "Recorded to corroborate a trace. Treated as personal data and removed with the session under the Ek-2 retention window.",
+   "fieldname": "section_break_context",
+   "fieldtype": "Section Break",
+   "label": "Session Context"
+  },
+  {
+   "fieldname": "ip_address",
+   "fieldtype": "Data",
+   "label": "IP Address",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_context",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "user_agent",
+   "fieldtype": "Small Text",
+   "label": "User Agent",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-26 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Watermark Session",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Moderator",
+   "share": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

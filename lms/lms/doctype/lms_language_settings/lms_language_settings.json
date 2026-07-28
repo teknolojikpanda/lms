@@ -27,7 +27,29 @@
   "column_break_search",
   "opensearch_use_iam",
   "opensearch_username",
-  "opensearch_password"
+  "opensearch_password",
+  "drm_section",
+  "drm_enabled",
+  "mediapackage_domain",
+  "drm_token_ttl_seconds",
+  "column_break_drm",
+  "drm_license_url",
+  "drm_license_token",
+  "watermark_section",
+  "watermark_enabled",
+  "watermark_label_prefix",
+  "watermark_opacity",
+  "column_break_watermark",
+  "watermark_move_interval_seconds",
+  "watermark_retention_days",
+  "dr_section",
+  "dr_region",
+  "rpo_target_minutes",
+  "rto_target_hours",
+  "column_break_dr",
+  "restore_test_interval_days",
+  "last_restore_test_at",
+  "last_dr_drill_at"
  ],
  "fields": [
   {
@@ -177,6 +199,157 @@
    "fieldname": "opensearch_password",
    "fieldtype": "Password",
    "label": "OpenSearch Password"
+  },
+  {
+   "description": "Enterprise video protection (§4.4.3). Off = MVP tier: CloudFront signed cookies. Enabling requires a third-party DRM licence agreement, which §1.2 places outside the delivery scope.",
+   "fieldname": "drm_section",
+   "fieldtype": "Section Break",
+   "label": "DRM (Enterprise)"
+  },
+  {
+   "default": "0",
+   "fieldname": "drm_enabled",
+   "fieldtype": "Check",
+   "label": "Enable DRM Playback"
+  },
+  {
+   "depends_on": "eval:doc.drm_enabled",
+   "description": "MediaPackage packaging group domain (Terraform output drm.packaging_group_domain_name).",
+   "fieldname": "mediapackage_domain",
+   "fieldtype": "Data",
+   "label": "MediaPackage Domain",
+   "mandatory_depends_on": "eval:doc.drm_enabled"
+  },
+  {
+   "default": "300",
+   "depends_on": "eval:doc.drm_enabled",
+   "description": "Playback tokens are shareable, so keep this short. Clamped to 30-3600 seconds.",
+   "fieldname": "drm_token_ttl_seconds",
+   "fieldtype": "Int",
+   "label": "Playback Token TTL (seconds)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_drm",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.drm_enabled",
+   "description": "Vendor licence server. Players never call this directly — requests are proxied so entitlement is checked first.",
+   "fieldname": "drm_license_url",
+   "fieldtype": "Data",
+   "label": "Licence Server URL",
+   "mandatory_depends_on": "eval:doc.drm_enabled"
+  },
+  {
+   "depends_on": "eval:doc.drm_enabled",
+   "fieldname": "drm_license_token",
+   "fieldtype": "Password",
+   "label": "Licence Server Token"
+  },
+  {
+   "description": "Draws a per-viewer code over the player so a screen recording traces back to whoever made it (§1.1 copying deterrence). Independent of DRM. True forensic (in-essence) watermarking is a Premium vendor option — see docs/watermarking.md.",
+   "fieldname": "watermark_section",
+   "fieldtype": "Section Break",
+   "label": "Session Watermark"
+  },
+  {
+   "default": "0",
+   "fieldname": "watermark_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Session Watermark"
+  },
+  {
+   "depends_on": "eval:doc.watermark_enabled",
+   "description": "Optional text before the code, e.g. the institution name. Never put personal data here — the overlay is visible to anyone watching the screen.",
+   "fieldname": "watermark_label_prefix",
+   "fieldtype": "Data",
+   "label": "Label Prefix"
+  },
+  {
+   "default": "35",
+   "depends_on": "eval:doc.watermark_enabled",
+   "description": "Percent. Too faint is unreadable in a recording; too strong makes the lesson unpleasant. Clamped to 15-80.",
+   "fieldname": "watermark_opacity",
+   "fieldtype": "Int",
+   "label": "Opacity (%)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_watermark",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "20",
+   "depends_on": "eval:doc.watermark_enabled",
+   "description": "How often the mark jumps position. A static mark is simply cropped out.",
+   "fieldname": "watermark_move_interval_seconds",
+   "fieldtype": "Int",
+   "label": "Move Interval (seconds)",
+   "non_negative": 1
+  },
+  {
+   "default": "180",
+   "depends_on": "eval:doc.watermark_enabled",
+   "description": "Sessions record IP and user agent, so they are personal data. 0 keeps them indefinitely.",
+   "fieldname": "watermark_retention_days",
+   "fieldtype": "Int",
+   "label": "Session Retention (days)",
+   "non_negative": 1
+  },
+  {
+   "description": "Business continuity targets and evidence (§6.1, §8.18). The dates below are what makes the restore-test MUST auditable rather than assumed.",
+   "fieldname": "dr_section",
+   "fieldtype": "Section Break",
+   "label": "Disaster Recovery"
+  },
+  {
+   "description": "DR region, when cross-region replication is enabled (§8.1 suggests eu-west-1). Blank means single-region.",
+   "fieldname": "dr_region",
+   "fieldtype": "Data",
+   "label": "DR Region"
+  },
+  {
+   "default": "60",
+   "description": "§6.1 states 15 min - 1 hour. Backups older than this are reported as a breach.",
+   "fieldname": "rpo_target_minutes",
+   "fieldtype": "Int",
+   "label": "RPO Target (minutes)",
+   "non_negative": 1
+  },
+  {
+   "default": "4",
+   "description": "§6.1 states 1-4 hours. Used to build the failover phase budget.",
+   "fieldname": "rto_target_hours",
+   "fieldtype": "Int",
+   "label": "RTO Target (hours)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "column_break_dr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "30",
+   "description": "How often a backup must actually be restored and verified (§8.18 MUST).",
+   "fieldname": "restore_test_interval_days",
+   "fieldtype": "Int",
+   "label": "Restore Test Interval (days)",
+   "non_negative": 1
+  },
+  {
+   "description": "Set by record_restore_test, and only on a pass. A failed test deliberately leaves this untouched.",
+   "fieldname": "last_restore_test_at",
+   "fieldtype": "Datetime",
+   "label": "Last Successful Restore Test",
+   "read_only": 1
+  },
+  {
+   "description": "Set by record_dr_drill. §8.18 asks for at least one a year.",
+   "fieldname": "last_dr_drill_at",
+   "fieldtype": "Datetime",
+   "label": "Last DR Drill",
+   "read_only": 1
   }
  ],
  "issingle": 1,

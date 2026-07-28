@@ -68,6 +68,10 @@ export const getAdminDashboard = () => invoke('get_admin_dashboard')
 
 export const getOwnerDashboard = () => invoke('get_owner_dashboard')
 
+export const getWatermark = (lesson) => invoke('get_watermark', { lesson })
+
+export const traceWatermark = (code) => invoke('trace_watermark', { code })
+
 /**
  * Upload a recorded Blob (e.g. MediaRecorder output) as a private file
  * attached to the given document, using Frappe's upload endpoint.
