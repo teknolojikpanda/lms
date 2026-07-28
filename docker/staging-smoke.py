@@ -915,6 +915,75 @@ def _speaking():
 		# pass removes it either way.
 		return f"Scoring → Queued after {minutes}m, retry 1"
 
+	@check("failed submission waits out its backoff before retrying")
+	def _():
+		from frappe.utils import add_to_date, get_datetime, now_datetime
+
+		from lms.lms.language_platform import speaking_pipeline
+		from lms.lms.language_platform.speaking_pipeline import (
+			_claim,
+			dispatch_due_retries,
+			process_submission,
+			retry_delay,
+		)
+
+		# Suppress the after_insert job: a worker claiming this row first
+		# would make the injected failure below a no-op — correct
+		# behaviour, but it would measure the worker instead of the retry.
+		real_enqueue = frappe.enqueue
+		frappe.enqueue = lambda *a, **k: None
+		try:
+			doc = frappe.get_doc(
+				{
+					"doctype": "LMS Speaking Submission",
+					"member": "Administrator",
+					"prompt": STATE["prompt"],
+					"audio_file": "/private/files/smoke.webm",
+					"duration_seconds": 30,
+				}
+			)
+			doc.insert(ignore_permissions=True)
+			frappe.db.commit()
+		finally:
+			frappe.enqueue = real_enqueue
+
+		class Exploding:
+			def transcribe(self, submission):
+				raise RuntimeError("provider unavailable")
+
+		original = speaking_pipeline.get_provider
+		speaking_pipeline.get_provider = lambda: Exploding()
+		try:
+			process_submission(doc.name)
+		finally:
+			speaking_pipeline.get_provider = original
+		frappe.db.commit()
+
+		row = frappe.db.get_value(
+			"LMS Speaking Submission", doc.name, ["status", "retry_count", "retry_after"], as_dict=True
+		)
+		if row.status != "Queued" or row.retry_count != 1 or not row.retry_after:
+			raise AssertionError(f"unexpected state after failure: {row}")
+
+		waited = (get_datetime(row.retry_after) - now_datetime()).total_seconds()
+		if not (0 < waited <= retry_delay(1) + 5):
+			raise AssertionError(f"backoff of {waited:.0f}s, expected about {retry_delay(1)}s")
+
+		# The wait is enforced at the claim, so it holds however the job arrives.
+		if _claim(doc.name):
+			raise AssertionError("claimed while still inside the backoff")
+		if doc.name in dispatch_due_retries()["dispatched"]:
+			raise AssertionError("dispatched before the backoff elapsed")
+
+		frappe.db.set_value(
+			"LMS Speaking Submission", doc.name, "retry_after", add_to_date(now_datetime(), seconds=-1)
+		)
+		frappe.db.commit()
+		if doc.name not in dispatch_due_retries()["dispatched"]:
+			raise AssertionError("not dispatched once the backoff elapsed")
+
+		return f"{waited:.0f}s backoff held, then dispatched"
+
 	@check("sweep leaves a submission that is still progressing")
 	def _():
 		from lms.lms.language_platform.speaking_pipeline import requeue_stale_submissions

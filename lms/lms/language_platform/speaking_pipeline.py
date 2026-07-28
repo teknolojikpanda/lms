@@ -6,9 +6,11 @@ Step Functions state machine (§4.9.1, §8.13, ADR-0001).
 
 States: Queued → Transcribing → Scoring → Ready | Failed
 
-- transient errors: retried up to MAX_RETRIES, like Step Functions retry
-  policies. The retry is enqueued immediately — RETRY_DELAYS_SECONDS
-  records the intended backoff, which needs a scheduler to deliver;
+- transient errors: retried up to MAX_RETRIES with the RETRY_DELAYS_SECONDS
+  backoff, like Step Functions retry policies. Frappe has no delayed
+  enqueue, so the delay is stored on the row as `retry_after` and
+  dispatch_due_retries enqueues what has come due. _claim enforces it, so
+  the wait holds however the submission gets enqueued;
 - permanent errors / exhausted retries: status = Failed with the error
   recorded — the DLQ analog; failures stay queryable for the ops screens;
 - idempotency (§8.11 MUST): the Queued → Transcribing transition is a
@@ -35,6 +37,50 @@ RETRY_DELAYS_SECONDS = [60, 300, 900]
 IN_FLIGHT_STATUSES = ("Transcribing", "Scoring")
 DEFAULT_STALE_AFTER_MINUTES = 30
 SWEEP_BATCH_SIZE = 200
+
+
+def retry_delay(attempt: int) -> int:
+	"""Seconds to wait before attempt number ``attempt`` (1-based).
+
+	Attempts past the end of the table reuse the last delay rather than
+	extending, since MAX_RETRIES stops the sequence anyway.
+	"""
+	index = min(max(int(attempt), 1) - 1, len(RETRY_DELAYS_SECONDS) - 1)
+	return RETRY_DELAYS_SECONDS[index]
+
+
+def _backoff_pending(retry_after, now=None) -> bool:
+	"""True while a submission is still serving its retry delay."""
+	if not retry_after:
+		return False
+	return get_datetime(retry_after) > (now or now_datetime())
+
+
+def dispatch_due_retries():
+	"""Enqueue retries whose backoff has elapsed. Runs every minute.
+
+	This is what turns RETRY_DELAYS_SECONDS from documentation into
+	behaviour. Frappe has no delayed enqueue, so the delay is stored on
+	the row and a scheduled pass picks up whatever has come due — which
+	is sturdier than a held job anyway: a queue flush or a worker restart
+	loses scheduled jobs, and loses nothing here.
+
+	Runs every minute because the first retry waits 60 seconds; a coarser
+	tick would round the shortest delay up to itself. `enqueue_processing`
+	deduplicates on a stable job id, so overlapping passes cannot stack
+	duplicate jobs, and _claim refuses anything not actually due.
+	"""
+	due = frappe.get_all(
+		"LMS Speaking Submission",
+		filters={"status": "Queued", "retry_after": ["<=", now_datetime()]},
+		pluck="name",
+		limit=SWEEP_BATCH_SIZE,
+	)
+	for name in due:
+		enqueue_processing(name)
+	if due:
+		frappe.logger("lms.speaking").info(f"dispatched {len(due)} due retr(ies)")
+	return {"dispatched": due}
 
 
 def enqueue_processing(submission_name: str):
@@ -103,14 +149,31 @@ def _claim(submission_name: str) -> bool:
 	Admitting only Queued rows means a worker that dies mid-run leaves
 	its submission unclaimable. requeue_stale_submissions is what brings
 	those back, and is the only thing that does.
+
+	A submission still inside its retry backoff is declined too, and this
+	is where the backoff is actually enforced. Anything may enqueue a
+	submission — the dispatcher, the stale sweep, an operator — so a
+	delay honoured only by the thing that schedules the job is not a
+	delay. Refusing the claim makes it hold no matter who calls.
 	"""
 	row = frappe.db.sql(
-		"SELECT status FROM `tabLMS Speaking Submission` WHERE name = %s FOR UPDATE",
+		"""
+		SELECT status, retry_after FROM `tabLMS Speaking Submission`
+		WHERE name = %s FOR UPDATE
+		""",
 		submission_name,
+		as_dict=True,
 	)
-	claimed = bool(row) and row[0][0] == "Queued"
+	current = row[0] if row else None
+	claimed = bool(current) and current.status == "Queued" and not _backoff_pending(current.retry_after)
 	if claimed:
-		frappe.db.set_value("LMS Speaking Submission", submission_name, "status", "Transcribing")
+		# retry_after is cleared as it is served, so a later failure sets a
+		# fresh delay rather than inheriting a spent one.
+		frappe.db.set_value(
+			"LMS Speaking Submission",
+			submission_name,
+			{"status": "Transcribing", "retry_after": None},
+		)
 	# Commit either way: this releases the row lock, and on the winning
 	# path it publishes the claim so a rival sees it immediately.
 	frappe.db.commit()
@@ -152,23 +215,24 @@ def _handle_failure(submission_name: str, error: Exception):
 		retry_count = current.retry_count or 0
 		if retry_count < MAX_RETRIES:
 			retry_count += 1
-			# Back to Queued so the retry can claim it.
+			# Back to Queued, but not yet runnable: retry_after carries the
+			# backoff. Nothing is enqueued here — dispatch_due_retries picks
+			# the submission up once the delay has elapsed.
+			#
+			# The delay lives on the row rather than in a job because that is
+			# the only version of it that survives. A worker holding a sleep,
+			# or a queue holding a scheduled job, loses the backoff the moment
+			# it restarts; a timestamp in the database does not.
 			frappe.db.set_value(
 				"LMS Speaking Submission",
 				submission_name,
-				{"retry_count": retry_count, "status": "Queued"},
+				{
+					"retry_count": retry_count,
+					"status": "Queued",
+					"retry_after": add_to_date(now_datetime(), seconds=retry_delay(retry_count)),
+				},
 			)
 			frappe.db.commit()
-			# Frappe/RQ has no native delayed enqueue; the retry runs on the
-			# long queue immediately and RETRY_DELAYS_SECONDS documents the
-			# intended backoff for a future scheduler-based re-drive.
-			frappe.enqueue(
-				process_submission,
-				queue="long",
-				deduplicate=True,
-				job_id=f"speaking::{submission_name}::retry{retry_count}",
-				submission_name=submission_name,
-			)
 		else:
 			frappe.db.set_value(
 				"LMS Speaking Submission",
@@ -232,6 +296,12 @@ def requeue_stale_submissions():
 	# deduplicates on a stable id, so re-running the sweep while one is
 	# genuinely still waiting in the queue does not pile up duplicates,
 	# and a row that a worker has since claimed is no longer Queued.
+	#
+	# This is also the backstop for a stalled dispatcher: a retry whose
+	# backoff elapsed but which was never picked up eventually ages past
+	# the threshold and is enqueued here instead. It cannot fire early —
+	# the longest backoff is far under the staleness threshold, and _claim
+	# refuses anything still inside its delay regardless.
 	for name in frappe.get_all(
 		"LMS Speaking Submission",
 		filters={"status": "Queued", "modified": ["<", cutoff]},
