@@ -2,13 +2,16 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import add_to_date, now_datetime
 
 from lms.lms.language_platform import speaking_pipeline
 from lms.lms.language_platform.speaking_pipeline import (
+	DEFAULT_STALE_AFTER_MINUTES,
 	MAX_RETRIES,
 	_claim,
 	_handle_failure,
 	process_submission,
+	requeue_stale_submissions,
 )
 
 
@@ -185,3 +188,106 @@ class TestSpeakingPipelineFailure(IntegrationTestCase):
 			speaking_pipeline.get_provider = original
 
 		self.assertEqual(calls, [], "an already-claimed submission must not reach the provider")
+
+	# --- the sweep for abandoned work ------------------------------------
+
+	@property
+	def threshold(self):
+		"""The site's configured staleness window, not the constant.
+
+		Read rather than assumed (or overwritten) so these cases hold on a
+		site whose administrator has tuned the setting.
+		"""
+		configured = frappe.get_cached_doc("LMS Language Settings").speaking_stale_after_minutes
+		return int(configured or 0) or DEFAULT_STALE_AFTER_MINUTES
+
+	def _age(self, name, minutes):
+		"""Backdate `modified` so the row looks abandoned that long ago."""
+		frappe.db.sql(
+			"UPDATE `tabLMS Speaking Submission` SET modified = %s WHERE name = %s",
+			(add_to_date(now_datetime(), minutes=-minutes), name),
+		)
+		frappe.db.commit()
+
+	def test_sweep_requeues_a_submission_abandoned_in_flight(self):
+		name = self._submission(status="Scoring")
+		self._age(name, self.threshold + 5)
+		self.enqueue.reset_mock()
+
+		summary = requeue_stale_submissions()
+
+		self.assertIn(name, summary["requeued"])
+		row = self._row(name)
+		self.assertEqual(row.status, "Queued", "a rescued submission must become claimable again")
+		self.assertEqual(row.retry_count, 1)
+		self.assertTrue(_claim(name), "and a worker must then be able to take it")
+
+	def test_sweep_leaves_a_submission_that_is_still_progressing(self):
+		"""The margin that keeps a slow worker from being treated as dead."""
+		name = self._submission(status="Transcribing")
+		self._age(name, self.threshold - 5)
+
+		summary = requeue_stale_submissions()
+
+		self.assertNotIn(name, summary["requeued"])
+		self.assertEqual(self._row(name).status, "Transcribing")
+
+	def test_sweep_gives_up_once_the_retry_budget_is_spent(self):
+		"""A submission that hangs every time must not cycle forever."""
+		name = self._submission(status="Scoring", retry_count=MAX_RETRIES)
+		self._age(name, self.threshold + 5)
+
+		summary = requeue_stale_submissions()
+
+		self.assertIn(name, summary["failed"])
+		row = self._row(name)
+		self.assertEqual(row.status, "Failed")
+		self.assertIn("Abandoned", row.error_message)
+
+	def test_sweep_re_enqueues_a_queued_row_whose_job_was_lost(self):
+		name = self._submission(status="Queued")
+		self._age(name, self.threshold + 5)
+		self.enqueue.reset_mock()
+
+		summary = requeue_stale_submissions()
+
+		self.assertIn(name, summary["re_enqueued"])
+		self.assertEqual(
+			self._row(name).status, "Queued", "re-driving a queued row must not change its state"
+		)
+		self.assertIn(name, [c.kwargs.get("submission_name") for c in self.enqueue.call_args_list])
+
+	def test_sweep_ignores_finished_submissions(self):
+		for status in ("Ready", "Failed"):
+			with self.subTest(status=status):
+				name = self._submission(status=status)
+				self._age(name, self.threshold * 10)
+				summary = requeue_stale_submissions()
+				self.assertNotIn(name, summary["requeued"] + summary["failed"] + summary["re_enqueued"])
+				self.assertEqual(self._row(name).status, status)
+
+	def test_a_resurrected_worker_cannot_undo_a_finished_submission(self):
+		"""The hazard the sweep introduces, and the guard that closes it.
+
+		Sweep re-queues a stalled submission, a second worker finishes it,
+		then the original wakes and reports the error it hit on its way
+		out. Recording that would knock a completed submission back to
+		Queued and re-run the provider on it.
+		"""
+		name = self._submission(status="Scoring")
+		self._age(name, self.threshold + 5)
+		requeue_stale_submissions()  # -> Queued, retry_count 1
+
+		# A second worker takes it and finishes.
+		self.assertTrue(_claim(name))
+		frappe.db.set_value(
+			"LMS Speaking Submission", name, {"status": "Ready", "final_score": 77}
+		)
+		frappe.db.commit()
+
+		# Now the original worker reports the failure it hit.
+		_handle_failure(name, RuntimeError("lost the claim"))
+
+		row = self._row(name)
+		self.assertEqual(row.status, "Ready", "a finished submission must not be reopened")
+		self.assertIsNone(row.error_message)

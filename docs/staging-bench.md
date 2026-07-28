@@ -69,7 +69,14 @@ are reported as still present:
   speaking-pipeline failure handler that saves a stale document was
   found only by reading it.
 
-Read those before overriding, then, on a disposable bench only:
+`cleanup` only knows about the smoke run's own fixtures. The upstream
+suite (`bench --site staging.localhost run-tests --app lms`) separately
+leaves orphaned `Course Chapter` and `Course Lesson` rows — pointing at a
+course whose transaction was rolled back — plus its `_Test*` users. Those
+have to be removed on their own; deleting rows whose parent course no
+longer exists is a safe filter for the first two.
+
+Read the above before overriding, then, on a disposable bench only:
 
 ```bash
 docker exec -w /home/frappe/frappe-bench lms-staging-frappe-1 \

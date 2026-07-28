@@ -850,6 +850,81 @@ def _speaking():
 			raise AssertionError("re-processing changed a completed submission")
 		return "no-op as designed"
 
+	@check("sweep rescues a submission abandoned mid-flight")
+	def _():
+		from frappe.utils import add_to_date, now_datetime
+
+		from lms.lms.language_platform.speaking_pipeline import requeue_stale_submissions
+
+		doc = frappe.get_doc(
+			{
+				"doctype": "LMS Speaking Submission",
+				"member": "Administrator",
+				"prompt": STATE["prompt"],
+				"audio_file": "/private/files/smoke.webm",
+				"duration_seconds": 30,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		frappe.db.commit()
+		# Let the pipeline finish before staging the scenario. Otherwise a
+		# worker is still mid-flight on this row and its next write moves
+		# `modified` forward, so the sweep correctly skips it and the check
+		# fails for a reason that has nothing to do with the sweep.
+		_await_terminal(doc.name)
+
+		# Exactly the state a worker dying mid-run leaves behind: in
+		# flight, with no progress since well before the threshold.
+		minutes = int(
+			frappe.get_cached_doc("LMS Language Settings").speaking_stale_after_minutes or 30
+		)
+		frappe.db.set_value("LMS Speaking Submission", doc.name, "status", "Scoring")
+		frappe.db.sql(
+			"UPDATE `tabLMS Speaking Submission` SET modified = %s WHERE name = %s",
+			(add_to_date(now_datetime(), minutes=-(minutes + 10)), doc.name),
+		)
+		frappe.db.commit()
+
+		summary = requeue_stale_submissions()
+		if doc.name not in summary["requeued"]:
+			raise AssertionError(f"not rescued; sweep reported {summary}")
+
+		row = frappe.db.get_value(
+			"LMS Speaking Submission", doc.name, ["status", "retry_count"], as_dict=True
+		)
+		if row.status != "Queued" or row.retry_count != 1:
+			raise AssertionError(f"status={row.status}, retry_count={row.retry_count}")
+		# Left Queued on purpose: a worker will finish it, and the cleanup
+		# pass removes it either way.
+		return f"Scoring → Queued after {minutes}m, retry 1"
+
+	@check("sweep leaves a submission that is still progressing")
+	def _():
+		from lms.lms.language_platform.speaking_pipeline import requeue_stale_submissions
+
+		doc = frappe.get_doc(
+			{
+				"doctype": "LMS Speaking Submission",
+				"member": "Administrator",
+				"prompt": STATE["prompt"],
+				"audio_file": "/private/files/smoke.webm",
+				"duration_seconds": 30,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		frappe.db.commit()
+		_await_terminal(doc.name)
+
+		# In flight, but having written just now — a slow worker, not a
+		# dead one. `modified` is left at the current time deliberately.
+		frappe.db.set_value("LMS Speaking Submission", doc.name, "status", "Transcribing")
+		frappe.db.commit()
+
+		summary = requeue_stale_submissions()
+		if doc.name in summary["requeued"]:
+			raise AssertionError("a submission that just wrote was treated as abandoned")
+		return "recent progress respected"
+
 
 # --- accessibility ------------------------------------------------------------------
 

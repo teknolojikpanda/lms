@@ -14,20 +14,27 @@ States: Queued → Transcribing → Scoring → Ready | Failed
 - idempotency (§8.11 MUST): the Queued → Transcribing transition is a
   locked check-and-set (see _claim), so exactly one worker processes a
   submission and re-processing one in any other state is a no-op. Each
-  state write is committed, so progress survives a crashed worker.
+  state write is committed, so progress survives a crashed worker;
+- abandoned work: a dead worker or a lost queue message would otherwise
+  strand a submission forever, since _claim admits only Queued rows.
+  requeue_stale_submissions sweeps for both hourly.
 
 Recording a failure never goes through the document API — see
 _handle_failure for why that distinction is load-bearing.
 """
 
 import frappe
-from frappe.utils import add_days, now_datetime
+from frappe.utils import add_days, add_to_date, get_datetime, now_datetime
 
 from lms.lms.language_platform.speaking_metrics import compute_metrics
 from lms.lms.language_platform.speaking_providers import get_provider
 
 MAX_RETRIES = 3
 RETRY_DELAYS_SECONDS = [60, 300, 900]
+
+IN_FLIGHT_STATUSES = ("Transcribing", "Scoring")
+DEFAULT_STALE_AFTER_MINUTES = 30
+SWEEP_BATCH_SIZE = 200
 
 
 def enqueue_processing(submission_name: str):
@@ -93,9 +100,9 @@ def _claim(submission_name: str) -> bool:
 	§8.11 idempotency guarantee actually hold: re-processing a submission
 	in any other state — Ready, Failed, or in flight — is a no-op.
 
-	Known gap: a worker that dies mid-run leaves the row in Transcribing
-	or Scoring, and nothing re-drives it. That was equally true before,
-	and closing it needs a scheduled sweep for stale in-flight rows.
+	Admitting only Queued rows means a worker that dies mid-run leaves
+	its submission unclaimable. requeue_stale_submissions is what brings
+	those back, and is the only thing that does.
 	"""
 	row = frappe.db.sql(
 		"SELECT status FROM `tabLMS Speaking Submission` WHERE name = %s FOR UPDATE",
@@ -130,11 +137,19 @@ def _handle_failure(submission_name: str, error: Exception):
 		f"Speaking pipeline failed for {submission_name}: {error}", "Speaking Pipeline Error"
 	)
 	try:
-		if not frappe.db.exists("LMS Speaking Submission", submission_name):
-			return  # deleted while in flight; there is nothing left to record
-		retry_count = (
-			frappe.db.get_value("LMS Speaking Submission", submission_name, "retry_count") or 0
+		current = frappe.db.get_value(
+			"LMS Speaking Submission", submission_name, ["status", "retry_count"], as_dict=True
 		)
+		if current is None:
+			return  # deleted while in flight; there is nothing left to record
+		if current.status in ("Ready", "Failed"):
+			# Someone else already finished it. This happens when the sweep
+			# re-queues a stalled submission, a second worker completes it,
+			# and the original then wakes up and reports the failure it hit
+			# on the way out. Writing here would knock a finished submission
+			# back to Queued and re-run the provider on it.
+			return
+		retry_count = current.retry_count or 0
 		if retry_count < MAX_RETRIES:
 			retry_count += 1
 			# Back to Queued so the retry can claim it.
@@ -169,6 +184,123 @@ def _handle_failure(submission_name: str, error: Exception):
 		frappe.log_error(
 			f"Could not record the failure of {submission_name}", "Speaking Pipeline Error"
 		)
+
+
+def requeue_stale_submissions():
+	"""Hourly sweep: recover submissions no worker is coming back for.
+
+	Two ways work gets abandoned, both of which used to strand a
+	submission permanently:
+
+	  * a worker dies mid-run, leaving the row in Transcribing or
+	    Scoring. _claim only admits Queued rows, so nothing would ever
+	    pick it up again;
+	  * the queue loses the job — a Redis restart, say — leaving the row
+	    in Queued with nothing scheduled to act on it.
+
+	The first is a genuine judgement call, because a worker that is slow
+	is indistinguishable from one that is dead: neither writes to the
+	row. The timeout is therefore the whole safety margin, which is why
+	it is configurable and why its default (30 minutes) sits far above
+	the real bound on the work — recordings are capped at a few minutes
+	by §8.13, so anything approaching the timeout is not merely slow.
+
+	Being wrong is survivable but not free: the original worker's next
+	write fails the timestamp check, and _handle_failure declines to
+	touch a submission another worker has since finished. The cost of
+	guessing wrong is one duplicate provider call, so the timeout is set
+	to make that rare rather than to make it impossible.
+	"""
+	minutes = (
+		int(frappe.get_cached_doc("LMS Language Settings").speaking_stale_after_minutes or 0)
+		or DEFAULT_STALE_AFTER_MINUTES
+	)
+	cutoff = add_to_date(now_datetime(), minutes=-minutes)
+	summary = {"requeued": [], "failed": [], "re_enqueued": [], "stale_after_minutes": minutes}
+
+	for row in frappe.get_all(
+		"LMS Speaking Submission",
+		filters={"status": ["in", IN_FLIGHT_STATUSES], "modified": ["<", cutoff]},
+		pluck="name",
+		limit=SWEEP_BATCH_SIZE,
+	):
+		outcome = _rescue_if_still_stale(row, cutoff)
+		if outcome:
+			summary[outcome].append(row)
+
+	# Queued rows need no state change — only a job. enqueue_processing
+	# deduplicates on a stable id, so re-running the sweep while one is
+	# genuinely still waiting in the queue does not pile up duplicates,
+	# and a row that a worker has since claimed is no longer Queued.
+	for name in frappe.get_all(
+		"LMS Speaking Submission",
+		filters={"status": "Queued", "modified": ["<", cutoff]},
+		pluck="name",
+		limit=SWEEP_BATCH_SIZE,
+	):
+		enqueue_processing(name)
+		summary["re_enqueued"].append(name)
+
+	for name in summary["requeued"]:
+		enqueue_processing(name)
+
+	if summary["requeued"] or summary["failed"] or summary["re_enqueued"]:
+		frappe.logger("lms.speaking").info(
+			f"stale sweep: requeued={len(summary['requeued'])} "
+			f"failed={len(summary['failed'])} re_enqueued={len(summary['re_enqueued'])} "
+			f"(threshold {minutes}m)"
+		)
+	return summary
+
+
+def _rescue_if_still_stale(submission_name: str, cutoff) -> str | None:
+	"""Re-queue one abandoned submission, or leave it alone.
+
+	The staleness test is repeated under a row lock rather than trusted
+	from the listing above. Between the two, the worker may have written
+	— which both proves it is alive and moves `modified` past the cutoff
+	— and re-queueing then would hand a live submission to a second
+	worker. Re-reading inside the lock makes this a compare-and-swap.
+	"""
+	locked = frappe.db.sql(
+		"""
+		SELECT status, modified, retry_count
+		FROM `tabLMS Speaking Submission`
+		WHERE name = %s FOR UPDATE
+		""",
+		submission_name,
+		as_dict=True,
+	)
+	row = locked[0] if locked else None
+	if not row or row.status not in IN_FLIGHT_STATUSES or get_datetime(row.modified) >= cutoff:
+		frappe.db.commit()  # release the lock; it progressed or vanished
+		return None
+
+	retry_count = (row.retry_count or 0) + 1
+	if retry_count > MAX_RETRIES:
+		# Shares the retry budget with _handle_failure on purpose: a
+		# submission that hangs every time must eventually stop.
+		frappe.db.set_value(
+			"LMS Speaking Submission",
+			submission_name,
+			{
+				"status": "Failed",
+				"error_message": (
+					f"Abandoned in {row.status} with no progress for over "
+					f"{MAX_RETRIES} recovery attempts."
+				)[:500],
+			},
+		)
+		outcome = "failed"
+	else:
+		frappe.db.set_value(
+			"LMS Speaking Submission",
+			submission_name,
+			{"status": "Queued", "retry_count": retry_count},
+		)
+		outcome = "requeued"
+	frappe.db.commit()
+	return outcome
 
 
 def purge_expired_audio():
