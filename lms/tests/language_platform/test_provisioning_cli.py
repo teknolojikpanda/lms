@@ -35,6 +35,35 @@ def _load_cli() -> types.ModuleType:
 cli = _load_cli()
 
 
+class TestReportedArtifacts(unittest.TestCase):
+	"""Backup verification must check the file *this* run wrote.
+
+	Scanning the backup directory and taking the newest dump reports
+	success for a leftover from an earlier run when the current backup
+	landed elsewhere or produced nothing — verifying a backup that does
+	not describe the data about to be destroyed.
+	"""
+
+	SAMPLE = """Backup Summary for site1.local at 2026-07-29 12:00:00
+	Config  : ./sites/site1.local/private/backups/20260729_120000-site1_local-site_config_backup.json 1.2KiB
+	Database: ./sites/site1.local/private/backups/20260729_120000-site1_local-database.sql.gz 4.5MiB
+	"""
+
+	def test_parses_the_names_bench_reported(self):
+		names = cli.reported_artifacts(self.SAMPLE)
+		self.assertIn("20260729_120000-site1_local-database.sql.gz", names)
+		self.assertIn("20260729_120000-site1_local-site_config_backup.json", names)
+
+	def test_paths_are_reduced_to_bare_filenames(self):
+		"""Compared against directory entries, so directories must not leak in."""
+		for name in cli.reported_artifacts(self.SAMPLE):
+			self.assertNotIn("/", name)
+
+	def test_empty_or_unparseable_output_yields_nothing(self):
+		for output in ("", None, "Backup failed", "no artefacts here"):
+			self.assertEqual(cli.reported_artifacts(output), set())
+
+
 class TestPurgeOrdering(unittest.TestCase):
 	def setUp(self):
 		self.calls = []

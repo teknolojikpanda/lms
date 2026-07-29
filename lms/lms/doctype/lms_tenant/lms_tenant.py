@@ -242,6 +242,16 @@ def archive_tenant(tenant: str, reason: str, grace_days: int = DEFAULT_GRACE_DAY
 	# with 7 days would still be refused for 90.
 	doc.grace_days = max(0, int(grace_days))
 	doc.purge_after = purge_after_date(archived_at, doc.grace_days).date()
+
+	# A new archival starts with no evidence behind it. A tenant that was
+	# archived, restored and archived again still carries the first
+	# archival's export and backup, and those describe the data as it was
+	# then — the tenant has been live in between. Left in place they
+	# satisfy the purge guards for an archival whose CLI was never run, so
+	# the site could be destroyed against a backup months out of date.
+	doc.export_location = None
+	doc.backup_verified = 0
+
 	doc.transition_to("Archived", reason.strip())
 
 	return {
@@ -268,6 +278,12 @@ def restore_tenant(tenant: str) -> dict:
 	doc.archived_at = None
 	doc.purge_after = None
 	doc.grace_days = None
+	# The archival is being undone, so its artefacts no longer describe a
+	# tenant anyone is about to delete. archive_tenant clears these too;
+	# doing it here as well means the record never carries evidence for an
+	# archival that is not in progress.
+	doc.export_location = None
+	doc.backup_verified = 0
 	doc.transition_to("Active")
 
 	return {

@@ -310,6 +310,18 @@ class TestPurgePreconditions(unittest.TestCase):
 	def test_all_guards_satisfied(self):
 		check_purge_preconditions(**self._args())  # must not raise
 
+	def test_missing_archival_date_is_refused(self):
+		"""A tenant with no archival date has no grace period to have served."""
+		with self.assertRaises(PurgeNotAllowed) as caught:
+			check_purge_preconditions(**self._args(status="Archived", archived_at=None))
+		self.assertIn("not archived", str(caught.exception).lower())
+
+	def test_purge_after_date_rejects_a_non_datetime(self):
+		"""Guards against a string date silently comparing wrong."""
+		for bad in ("2026-01-01", 1767225600, None, object()):
+			with self.assertRaises(ValueError, msg=f"accepted {bad!r}"):
+				purge_after_date(bad)
+
 	def test_active_tenant_cannot_be_purged(self):
 		with self.assertRaises(PurgeNotAllowed) as ctx:
 			check_purge_preconditions(**self._args(status="Active"))
