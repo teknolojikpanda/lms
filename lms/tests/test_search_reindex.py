@@ -38,7 +38,9 @@ class _FakeClient:
 		self.delete_by_query_calls = []
 
 	def delete_by_query(self, index, body, refresh=False, conflicts=None):
-		self.delete_by_query_calls.append({"index": index, "body": body, "conflicts": conflicts})
+		self.delete_by_query_calls.append(
+			{"index": index, "body": body, "refresh": refresh, "conflicts": conflicts}
+		)
 		return {"deleted": 3}
 
 
@@ -120,10 +122,19 @@ class TestReindexRemovesOrphans(IntegrationTestCase):
 		self.assertEqual(len(self.client.delete_by_query_calls), 1, "no cleanup was issued")
 		self.assertEqual(result["removed_stale"], 3)
 
-		body = self.client.delete_by_query_calls[0]["body"]
-		clauses = body["query"]["bool"]["should"]
+		call = self.client.delete_by_query_calls[0]
+		clauses = call["body"]["query"]["bool"]["should"]
 		self.assertTrue(any("range" in c for c in clauses))
 		self.assertTrue(any("must_not" in c.get("bool", {}) for c in clauses))
+
+		# Both arguments are behavioural, not decoration: without the
+		# refresh a search straight after the repair still returns the
+		# documents it just removed, and without `proceed` a single
+		# version conflict abandons the rest of the cleanup.
+		self.assertTrue(call["refresh"], "deletions would not be visible to the next search")
+		self.assertEqual(
+			call["conflicts"], "proceed", "one conflicting document would abort the whole cleanup"
+		)
 
 	def test_the_cutoff_is_not_later_than_the_documents_written(self):
 		"""Taken before the scan, so a concurrent write survives.
@@ -150,6 +161,18 @@ class TestReindexRemovesOrphans(IntegrationTestCase):
 
 		self.client.delete_by_query = exploding
 
+		# Swallowing the error is only acceptable because it is recorded.
+		# Untested, a later change could drop the logging and leave the
+		# repair failing in silence night after night.
+		logged = []
+		original = frappe.log_error
+		frappe.log_error = lambda **kwargs: logged.append(kwargs)
+		self.addCleanup(setattr, frappe, "log_error", original)
+
 		result = self.provider.reindex("LMS Question")
 		self.assertGreater(result["indexed"], 0)
 		self.assertEqual(result["removed_stale"], 0)
+
+		self.assertEqual(len(logged), 1, "the cleanup failed without being logged")
+		self.assertEqual(logged[0]["title"], "OpenSearch stale-document cleanup failed")
+		self.assertIn("cluster unreachable", logged[0]["message"])
