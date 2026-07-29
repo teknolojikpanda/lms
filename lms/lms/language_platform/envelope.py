@@ -26,6 +26,38 @@ def get_correlation_id() -> str:
 	return uuid.uuid4().hex
 
 
+# Frappe raises these to steer the request, not to report a failure: a
+# Redirect performs a redirect, and the auth and session errors carry
+# their own status codes and challenge headers. They subclass Exception
+# directly, so the catch-all below would otherwise turn a redirect into a
+# 500 and an expired session into one too. Let them through untouched.
+PASS_THROUGH_EXCEPTIONS = (
+	frappe.exceptions.Redirect,
+	frappe.exceptions.AuthenticationError,
+	frappe.exceptions.SessionStopped,
+	frappe.exceptions.CSRFTokenError,
+)
+
+GENERIC_ERROR_MESSAGE = (
+	"Something went wrong on our side. Quote the correlation id if you report this."
+)
+
+
+def _discard_partial_work():
+	"""Roll back whatever the failed call had already written.
+
+	Swallowing an exception and returning a value makes the request look
+	successful, and `frappe.app.sync_database` commits on that path for
+	any state-changing method. Without this, a call that failed halfway
+	would have its first half committed — the opposite of what the
+	framework does when the exception is allowed to propagate.
+	"""
+	try:
+		frappe.db.rollback()
+	except Exception:
+		pass  # nothing usable to roll back; never mask the original error
+
+
 def envelope(fn):
 	"""Wrap a whitelisted method's return value in the §7.3 envelope."""
 
@@ -36,6 +68,7 @@ def envelope(fn):
 			data = fn(*args, **kwargs)
 			return {"ok": True, "data": data, "meta": {"correlationId": correlation_id}}
 		except frappe.exceptions.ValidationError as e:
+			_discard_partial_work()
 			frappe.clear_messages()
 			frappe.local.response["http_status_code"] = 417
 			return {
@@ -44,11 +77,50 @@ def envelope(fn):
 				"meta": {"correlationId": correlation_id},
 			}
 		except frappe.PermissionError as e:
+			_discard_partial_work()
 			frappe.clear_messages()
 			frappe.local.response["http_status_code"] = 403
 			return {
 				"ok": False,
 				"error": {"code": "AUTH_FORBIDDEN", "message": str(e) or "Not permitted.", "details": None},
+				"meta": {"correlationId": correlation_id},
+			}
+		except PASS_THROUGH_EXCEPTIONS:
+			raise
+		except Exception:
+			# Everything unforeseen. Without this the §7.3 contract broke
+			# exactly when a client most needs a structured error: a
+			# KeyError or a database failure escaped as a bare Frappe
+			# error, so a caller parsing the envelope got a shape it had
+			# never been told about.
+			_discard_partial_work()
+
+			# The correlation id is the whole point of logging here. The
+			# client is told nothing about the cause deliberately, so the
+			# id is the only thread tying their report to this traceback.
+			frappe.log_error(
+				title=f"Language platform API error [{correlation_id}]",
+				message=f"correlationId: {correlation_id}\nendpoint: {fn.__module__}.{fn.__name__}\n\n"
+				+ frappe.get_traceback(),
+			)
+			# log_error does not commit, and a read-only request would be
+			# rolled back on the way out — taking the log with it. Commit
+			# now, which is safe because the rollback above left nothing
+			# else pending.
+			try:
+				frappe.db.commit()
+			except Exception:
+				pass
+
+			frappe.clear_messages()
+			frappe.local.response["http_status_code"] = 500
+			return {
+				"ok": False,
+				"error": {
+					"code": "INTERNAL_ERROR",
+					"message": GENERIC_ERROR_MESSAGE,
+					"details": None,
+				},
 				"meta": {"correlationId": correlation_id},
 			}
 
