@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import secrets
 import subprocess
 import sys
@@ -270,12 +271,27 @@ def archive(args) -> int:
 	return 0
 
 
+ARTIFACT_PATTERN = re.compile(r"\S+?-(?:database\.sql\.gz|files\.tar|site_config_backup\.json)")
+
+
+def reported_artifacts(command_output: str) -> set[str]:
+	"""Backup filenames as ``bench backup`` itself reported them."""
+	return {Path(match).name for match in ARTIFACT_PATTERN.findall(command_output or "")}
+
+
 def _verify_backup(site: str, command_output: str, *, dry_run: bool) -> list[str] | None:
-	"""Confirm the backup files exist and are non-empty.
+	"""Confirm the backup files exist, are non-empty, and are *this* backup.
 
 	`bench backup` reporting success is not enough: a zero-byte dump is a
 	successful command and a worthless artefact, and this is the last
 	point at which anyone would notice before the data is destroyed.
+
+	Nor is finding *a* dump enough. This used to scan the backup directory
+	and take whatever was newest, ignoring what the command said it wrote.
+	A backup configured to land elsewhere, or one that produced nothing,
+	would leave an older dump sitting in that directory — and verifying
+	that one reports success for a backup that does not describe the data
+	about to be deleted. So the file has to be one the command named.
 	"""
 	if dry_run:
 		print("  (dry run: skipping artefact verification)")
@@ -293,6 +309,17 @@ def _verify_backup(site: str, command_output: str, *, dry_run: bool) -> list[str
 	if not dumps:
 		print(f"  no database dump found in {backup_dir}", file=sys.stderr)
 		return None
+
+	reported = reported_artifacts(command_output)
+	if reported and dumps[0].name not in reported:
+		print(
+			f"  {dumps[0].name} is the newest dump here, but `bench backup` reported "
+			f"{sorted(reported)}. Refusing to verify a backup this run did not write.",
+			file=sys.stderr,
+		)
+		return None
+	if not reported:
+		print("  warning: `bench backup` named no artefacts; verifying by directory alone")
 
 	verified = []
 	for path in dumps[:1]:

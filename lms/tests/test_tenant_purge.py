@@ -106,6 +106,41 @@ class TestTenantPurgeGuards(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			assert_purge_allowed(self.subdomain)
 
+	def test_re_archiving_discards_the_previous_archival_evidence(self):
+		"""The data-loss path: an old backup satisfying a new archival.
+
+		Archive, restore, live a while, archive again. The first
+		archival's export and backup describe data as it was then, but
+		they used to survive both steps — so once the second grace period
+		expired the purge guards were satisfied by a backup that predated
+		everything the tenant did in between, and the site could be
+		destroyed against it.
+		"""
+		self._archive(grace_days=7, days_ago=10)
+		assert_purge_allowed(self.subdomain)  # evidence in place, guards pass
+
+		restore_tenant(self.subdomain)
+		frappe.db.commit()
+		restored = frappe.get_doc("LMS Tenant", self.subdomain)
+		self.assertFalse(restored.export_location, "stale export survived the restore")
+		self.assertFalse(restored.backup_verified, "stale backup flag survived the restore")
+
+		# Archived again, and its CLI has NOT been run this time.
+		archive_tenant(self.subdomain, "Contract ended for real", grace_days=7)
+		frappe.db.set_value(
+			"LMS Tenant", self.subdomain, "archived_at", add_to_date(now_datetime(), days=-10)
+		)
+		frappe.db.commit()
+
+		doc = frappe.get_doc("LMS Tenant", self.subdomain)
+		self.assertFalse(doc.export_location, "the previous archival's export was reused")
+		self.assertFalse(doc.backup_verified, "the previous archival's backup was reused")
+
+		readiness = get_purge_readiness(self.subdomain)
+		self.assertFalse(readiness["ready"], "purge allowed with no backup for this archival")
+		with self.assertRaises(frappe.ValidationError):
+			assert_purge_allowed(self.subdomain)
+
 	def test_restoring_clears_the_grace_period(self):
 		"""A restored tenant carries no stale clock into a later archival."""
 		self._archive(grace_days=7, days_ago=10)
