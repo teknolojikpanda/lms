@@ -133,17 +133,50 @@ class OpenSearchProvider:
 		# Prefer IAM (the ECS task role, §8.13 pattern) over static
 		# credentials; fall back to basic auth for self-managed clusters.
 		if self.settings.opensearch_use_iam:
-			from opensearchpy import AWSV4SignerAuth
-			import boto3
-
-			region = self.settings.aws_region or "eu-central-1"
-			credentials = boto3.Session().get_credentials()
-			kwargs["http_auth"] = AWSV4SignerAuth(credentials, region, "es")
+			kwargs["http_auth"] = self._iam_auth()
 		elif self.settings.opensearch_username:
 			password = self.settings.get_password("opensearch_password", raise_exception=False)
 			kwargs["http_auth"] = (self.settings.opensearch_username, password)
 
 		return OpenSearch(**kwargs)
+
+	def _iam_auth(self):
+		"""Sign requests with the task role, failing clearly if it is absent.
+
+		`get_credentials()` returns None outside an environment that
+		provides a role, and AWSV4SignerAuth accepts that without
+		complaint — so the failure surfaces later, from inside the signer,
+		in an error naming neither IAM nor the setting that turned it on.
+		An operator reads that as the cluster being unreachable and goes
+		looking at the network.
+
+		Deliberately not falling back to the configured username and
+		password: IAM was asked for, and quietly authenticating some other
+		way hides a broken task role instead of reporting it.
+		"""
+		try:
+			import boto3
+		except ImportError:
+			frappe.throw(
+				_(
+					"boto3 is required to authenticate to OpenSearch with IAM. Install it, or "
+					"turn off 'Authenticate with IAM' and set a username and password."
+				)
+			)
+
+		from opensearchpy import AWSV4SignerAuth
+
+		credentials = boto3.Session().get_credentials()
+		if credentials is None:
+			frappe.throw(
+				_(
+					"No AWS credentials are available, so OpenSearch requests cannot be signed. "
+					"Attach a task role to this environment, or turn off 'Authenticate with IAM' "
+					"in LMS Language Settings and set a username and password instead."
+				)
+			)
+
+		return AWSV4SignerAuth(credentials, self.settings.aws_region or "eu-central-1", "es")
 
 	def _index(self, doctype: str) -> str:
 		return index_name(
