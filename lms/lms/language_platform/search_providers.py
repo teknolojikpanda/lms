@@ -22,10 +22,13 @@ Both return the same result shape, so callers never branch on provider.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import frappe
 from frappe import _
 
 from lms.lms.language_platform.search_rules import (
+	INDEXED_AT_FIELD,
 	SEARCH_SOURCES,
 	build_document,
 	clamp_limit,
@@ -33,7 +36,17 @@ from lms.lms.language_platform.search_rules import (
 	escape_like,
 	index_name,
 	owner_field,
+	stale_document_query,
 )
+
+
+def _utc_now_iso() -> str:
+	"""Index timestamps in UTC, independent of the site's timezone.
+
+	The cutoff is compared against values written by other workers, which
+	need not share a timezone with whoever runs the reindex.
+	"""
+	return datetime.now(timezone.utc).isoformat()
 
 
 def get_provider():
@@ -146,7 +159,9 @@ class OpenSearchProvider:
 		self._client().index(
 			index=self._index(doctype),
 			id=document_id(doctype, name),
-			body=build_document(doctype, row),
+			# Stamped so a reindex running concurrently sees this as newer
+			# than its own cutoff and leaves it alone.
+			body={**build_document(doctype, row), INDEXED_AT_FIELD: _utc_now_iso()},
 			refresh=False,
 		)
 
@@ -171,19 +186,94 @@ class OpenSearchProvider:
 		if not client.indices.exists(index=index):
 			client.indices.create(index=index)
 
+		# Taken before the scan, not after: anything written while this
+		# runs must count as newer than the cutoff and survive.
+		started_at = _utc_now_iso()
+
+		written: list[str] = []
+
 		def actions():
 			for row in frappe.get_all(
 				doctype, fields=source["indexed_fields"], limit_page_length=0, ignore_permissions=True
 			):
+				written.append(row["name"])
 				yield {
 					"_index": index,
 					"_id": document_id(doctype, row["name"]),
-					"_source": build_document(doctype, row),
+					"_source": {**build_document(doctype, row), INDEXED_AT_FIELD: started_at},
 				}
 
 		indexed, _errors = bulk(client, actions(), stats_only=True)
 		client.indices.refresh(index=index)
-		return {"indexed": indexed, "provider": self.name, "index": index}
+
+		# A row deleted between the scan and the write gets recreated from
+		# the stale snapshot — and because it lands stamped exactly
+		# `started_at`, the cleanup below (which matches strictly older)
+		# leaves it alone. A reindex would therefore resurrect an erased
+		# transcript and keep it searchable until the next run, which is
+		# the failure this whole pass exists to prevent. Only the rows
+		# this run wrote can be affected, so only those are re-checked.
+		resurrected = self._remove_vanished_rows(doctype, written)
+
+		# Upserting the surviving rows is only half a repair. Documents
+		# this pass did not write have no row behind them any more — a
+		# deletion whose incremental removal was lost, or a transcript the
+		# retention job purged while the index was unreachable — and
+		# without this they stay searchable for ever. That is what made
+		# the advertised nightly repair unable to repair a deletion.
+		removed = 0
+		try:
+			response = client.delete_by_query(
+				index=index,
+				body=stale_document_query(started_at),
+				refresh=True,
+				conflicts="proceed",
+			)
+			removed = response.get("deleted", 0)
+		except Exception:
+			# Never let the cleanup lose the reindex that just succeeded;
+			# the next run retries it. Logged rather than raised because
+			# this runs from the scheduler.
+			frappe.log_error(
+				title="OpenSearch stale-document cleanup failed",
+				message=f"index={index}\n{frappe.get_traceback()}",
+			)
+
+		return {
+			"indexed": indexed,
+			"removed_stale": removed,
+			"removed_resurrected": resurrected,
+			"provider": self.name,
+			"index": index,
+		}
+
+	def _remove_vanished_rows(self, doctype: str, names: list[str], chunk: int = 500) -> int:
+		"""Undo writes for rows deleted while the reindex was running.
+
+		Re-checked in chunks rather than one `IN` clause over the whole
+		table: this runs against every indexed row, and a single query
+		listing them all is a needlessly large statement for a job whose
+		result is usually nothing.
+
+		This narrows the window rather than eliminating it — a row deleted
+		after the re-check is handled by its own incremental removal,
+		which now runs after this write and so wins. What is left is the
+		case where that removal itself fails, and the next reindex catches
+		it as a stale document.
+		"""
+		vanished: list[str] = []
+		for start in range(0, len(names), chunk):
+			window = names[start : start + chunk]
+			alive = set(
+				frappe.get_all(
+					doctype, filters={"name": ["in", window]}, pluck="name", ignore_permissions=True
+				)
+			)
+			vanished.extend(name for name in window if name not in alive)
+
+		for name in vanished:
+			self.remove_document(doctype, name)
+		return len(vanished)
 
 	def search(self, doctype: str, query: str, limit: int, owner: str | None = None) -> list[dict]:
 		source = SEARCH_SOURCES[doctype]
