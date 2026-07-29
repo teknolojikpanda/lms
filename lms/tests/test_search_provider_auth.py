@@ -104,3 +104,20 @@ class TestOpenSearchAuth(IntegrationTestCase):
 
 		client = self.provider._client()
 		self.assertEqual(client.http_auth, ("fallback-user", "secret"))
+
+	def test_client_actually_uses_iam_auth_when_iam_is_on(self):
+		"""Wiring, not behaviour: the checks above are worth nothing if
+		_client stops calling the method that performs them."""
+		sentinel = object()
+		self.provider._iam_auth = lambda: sentinel
+
+		client = self.provider._client()
+		self.assertIs(client.http_auth, sentinel, "_client did not route through _iam_auth")
+
+	def test_iam_takes_precedence_over_a_configured_password(self):
+		"""Both are set; the setting decides, and it is not the password."""
+		self.provider.settings.get_password = lambda *a, **k: "secret"
+		sentinel = object()
+		self.provider._iam_auth = lambda: sentinel
+
+		self.assertIs(self.provider._client().http_auth, sentinel)
