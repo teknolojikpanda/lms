@@ -14,6 +14,7 @@ Pure tests — no Frappe site required:
 import unittest
 
 from lms.lms.language_platform.search_rules import (
+	INDEXED_AT_FIELD,
 	SEARCH_SOURCES,
 	SearchError,
 	build_document,
@@ -26,8 +27,59 @@ from lms.lms.language_platform.search_rules import (
 	requires_owner_filter,
 	sanitize_query,
 	searchable_doctypes,
+	stale_document_query,
 	strip_html,
 )
+
+
+class TestStaleDocumentQuery(unittest.TestCase):
+	"""A reindex has to remove what it did not write.
+
+	Upserting the surviving rows leaves documents behind for rows that no
+	longer exist — a deletion whose incremental removal was lost, or a
+	transcript the retention job purged while the index was unreachable.
+	They stay searchable for ever, which makes an erasure incomplete.
+	"""
+
+	CUTOFF = "2026-07-29T12:00:00+00:00"
+
+	def _clauses(self):
+		return stale_document_query(self.CUTOFF)["query"]["bool"]["should"]
+
+	def test_matches_documents_older_than_the_run(self):
+		ranges = [c for c in self._clauses() if "range" in c]
+		self.assertEqual(len(ranges), 1)
+		self.assertEqual(ranges[0]["range"][INDEXED_AT_FIELD], {"lt": self.CUTOFF})
+
+	def test_matches_documents_with_no_timestamp_at_all(self):
+		"""Written before the field existed; a range test would skip them."""
+		missing = [c for c in self._clauses() if "must_not" in c.get("bool", {})]
+		self.assertEqual(len(missing), 1)
+		self.assertEqual(missing[0]["bool"]["must_not"], {"exists": {"field": INDEXED_AT_FIELD}})
+
+	def test_either_condition_is_enough(self):
+		self.assertEqual(stale_document_query(self.CUTOFF)["query"]["bool"]["minimum_should_match"], 1)
+
+	def test_the_cutoff_is_never_open_ended(self):
+		"""An empty cutoff would build a query matching the whole index."""
+		for bad in ("", None):
+			with self.assertRaises(SearchError, msg=f"accepted {bad!r}"):
+				stale_document_query(bad)
+
+	def test_a_document_written_during_the_run_is_not_matched(self):
+		"""Concurrency: an incremental write mid-reindex must survive.
+
+		Its timestamp is newer than the cutoff, so it fails the range
+		clause and carries the field, so it fails the missing clause.
+		"""
+		later = "2026-07-29T12:00:01+00:00"
+		clauses = self._clauses()
+		range_clause = next(c for c in clauses if "range" in c)
+		self.assertLess(
+			range_clause["range"][INDEXED_AT_FIELD]["lt"],
+			later,
+			"a document written after the cutoff would be deleted as untouched",
+		)
 
 
 class TestAnswerKeyExclusion(unittest.TestCase):

@@ -22,10 +22,13 @@ Both return the same result shape, so callers never branch on provider.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import frappe
 from frappe import _
 
 from lms.lms.language_platform.search_rules import (
+	INDEXED_AT_FIELD,
 	SEARCH_SOURCES,
 	build_document,
 	clamp_limit,
@@ -33,7 +36,17 @@ from lms.lms.language_platform.search_rules import (
 	escape_like,
 	index_name,
 	owner_field,
+	stale_document_query,
 )
+
+
+def _utc_now_iso() -> str:
+	"""Index timestamps in UTC, independent of the site's timezone.
+
+	The cutoff is compared against values written by other workers, which
+	need not share a timezone with whoever runs the reindex.
+	"""
+	return datetime.now(timezone.utc).isoformat()
 
 
 def get_provider():
@@ -146,7 +159,9 @@ class OpenSearchProvider:
 		self._client().index(
 			index=self._index(doctype),
 			id=document_id(doctype, name),
-			body=build_document(doctype, row),
+			# Stamped so a reindex running concurrently sees this as newer
+			# than its own cutoff and leaves it alone.
+			body={**build_document(doctype, row), INDEXED_AT_FIELD: _utc_now_iso()},
 			refresh=False,
 		)
 
@@ -171,6 +186,10 @@ class OpenSearchProvider:
 		if not client.indices.exists(index=index):
 			client.indices.create(index=index)
 
+		# Taken before the scan, not after: anything written while this
+		# runs must count as newer than the cutoff and survive.
+		started_at = _utc_now_iso()
+
 		def actions():
 			for row in frappe.get_all(
 				doctype, fields=source["indexed_fields"], limit_page_length=0, ignore_permissions=True
@@ -178,12 +197,42 @@ class OpenSearchProvider:
 				yield {
 					"_index": index,
 					"_id": document_id(doctype, row["name"]),
-					"_source": build_document(doctype, row),
+					"_source": {**build_document(doctype, row), INDEXED_AT_FIELD: started_at},
 				}
 
 		indexed, _errors = bulk(client, actions(), stats_only=True)
 		client.indices.refresh(index=index)
-		return {"indexed": indexed, "provider": self.name, "index": index}
+
+		# Upserting the surviving rows is only half a repair. Documents
+		# this pass did not write have no row behind them any more — a
+		# deletion whose incremental removal was lost, or a transcript the
+		# retention job purged while the index was unreachable — and
+		# without this they stay searchable for ever. That is what made
+		# the advertised nightly repair unable to repair a deletion.
+		removed = 0
+		try:
+			response = client.delete_by_query(
+				index=index,
+				body=stale_document_query(started_at),
+				refresh=True,
+				conflicts="proceed",
+			)
+			removed = response.get("deleted", 0)
+		except Exception:
+			# Never let the cleanup lose the reindex that just succeeded;
+			# the next run retries it. Logged rather than raised because
+			# this runs from the scheduler.
+			frappe.log_error(
+				title="OpenSearch stale-document cleanup failed",
+				message=f"index={index}\n{frappe.get_traceback()}",
+			)
+
+		return {
+			"indexed": indexed,
+			"removed_stale": removed,
+			"provider": self.name,
+			"index": index,
+		}
 
 	def search(self, doctype: str, query: str, limit: int, owner: str | None = None) -> list[dict]:
 		source = SEARCH_SOURCES[doctype]

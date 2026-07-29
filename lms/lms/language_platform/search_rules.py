@@ -156,6 +156,47 @@ def build_document(doctype: str, row: dict) -> dict:
 	return document
 
 
+# Stamped on every document as it is written, and the only way a full
+# reindex can tell a row it just wrote from one left behind by a row that
+# no longer exists.
+INDEXED_AT_FIELD = "indexed_at"
+
+
+def stale_document_query(indexed_before: str) -> dict:
+	"""Documents a reindex did not write, and so no longer have a row.
+
+	A full reindex upserts every row still in the database. Anything in
+	the index it did *not* touch has no row behind it any more — a
+	deleted submission whose incremental removal was lost, or one purged
+	by the retention job while the index was unreachable. Left alone it
+	stays searchable for ever, transcript included, which makes an
+	erasure incomplete (§4.9.3).
+
+	Matching on "older than this run started" rather than "not tagged
+	with this run id" is deliberate: a document written incrementally
+	*while* the reindex is in flight carries a newer timestamp, so it
+	survives instead of being deleted as untouched.
+
+	Documents written before this field existed carry no timestamp at
+	all. They are stale by definition — the reindex would have restamped
+	them if a row still existed — so the missing-field case is matched
+	explicitly rather than left to a range comparison that would skip it.
+	"""
+	if not indexed_before:
+		raise SearchError("A reindex cutoff is required to remove stale documents.")
+	return {
+		"query": {
+			"bool": {
+				"should": [
+					{"bool": {"must_not": {"exists": {"field": INDEXED_AT_FIELD}}}},
+					{"range": {INDEXED_AT_FIELD: {"lt": indexed_before}}},
+				],
+				"minimum_should_match": 1,
+			}
+		}
+	}
+
+
 def document_id(doctype: str, name: str) -> str:
 	"""Stable id so re-indexing a row replaces it instead of duplicating."""
 	return f"{doctype}::{name}"
