@@ -14,7 +14,7 @@ import types
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms.lms.language_platform.search_rules import INDEXED_AT_FIELD
+from lms.lms.language_platform.search_rules import INDEXED_AT_FIELD, document_id
 
 
 class _FakeIndices:
@@ -36,6 +36,10 @@ class _FakeClient:
 	def __init__(self):
 		self.indices = _FakeIndices()
 		self.delete_by_query_calls = []
+		self.deleted_ids = []
+
+	def delete(self, index, id, refresh=False):
+		self.deleted_ids.append(id)
 
 	def delete_by_query(self, index, body, refresh=False, conflicts=None):
 		self.delete_by_query_calls.append(
@@ -46,10 +50,14 @@ class _FakeClient:
 
 def _install_opensearch_stubs():
 	"""Make `from opensearchpy.helpers import bulk` importable."""
-	recorded = {"actions": []}
+	recorded = {"actions": [], "during_bulk": None}
 
 	def bulk(client, actions, stats_only=False):
 		recorded["actions"] = list(actions)
+		# Hook for simulating a row deleted after the scan materialised it
+		# but before its document was written.
+		if recorded["during_bulk"]:
+			recorded["during_bulk"]()
 		return len(recorded["actions"]), []
 
 	root = types.ModuleType("opensearchpy")
@@ -152,6 +160,42 @@ class TestReindexRemovesOrphans(IntegrationTestCase):
 				action["_source"][INDEXED_AT_FIELD],
 				"the cutoff is newer than a document this run wrote",
 			)
+
+	def test_a_row_deleted_mid_reindex_is_not_resurrected(self):
+		"""The race the timestamp alone does not cover.
+
+		A deletion between the scan and the write succeeds against the
+		index, then the stale snapshot recreates the document — stamped
+		exactly at the cutoff, so the "older than this run" cleanup leaves
+		it alone. An erased transcript would be searchable again until the
+		next reindex, which is the failure this whole pass exists to stop.
+		"""
+		doomed = self.question.name
+
+		def delete_it_mid_flight():
+			frappe.delete_doc(
+				"LMS Question", doomed, force=True, ignore_permissions=True, ignore_missing=True
+			)
+			frappe.db.commit()
+
+		self.recorded["during_bulk"] = delete_it_mid_flight
+
+		result = self.provider.reindex("LMS Question")
+
+		self.assertEqual(
+			result["removed_resurrected"], 1, "the recreated document was left in the index"
+		)
+		self.assertIn(
+			document_id("LMS Question", doomed),
+			self.client.deleted_ids,
+			"the resurrected document was never deleted",
+		)
+
+	def test_rows_that_survive_are_not_removed(self):
+		"""The re-check must not delete documents for rows still present."""
+		result = self.provider.reindex("LMS Question")
+		self.assertEqual(result["removed_resurrected"], 0)
+		self.assertEqual(self.client.deleted_ids, [])
 
 	def test_a_failed_cleanup_does_not_lose_the_reindex(self):
 		"""The upsert already succeeded; the next run retries the cleanup."""

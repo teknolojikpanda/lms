@@ -190,10 +190,13 @@ class OpenSearchProvider:
 		# runs must count as newer than the cutoff and survive.
 		started_at = _utc_now_iso()
 
+		written: list[str] = []
+
 		def actions():
 			for row in frappe.get_all(
 				doctype, fields=source["indexed_fields"], limit_page_length=0, ignore_permissions=True
 			):
+				written.append(row["name"])
 				yield {
 					"_index": index,
 					"_id": document_id(doctype, row["name"]),
@@ -202,6 +205,15 @@ class OpenSearchProvider:
 
 		indexed, _errors = bulk(client, actions(), stats_only=True)
 		client.indices.refresh(index=index)
+
+		# A row deleted between the scan and the write gets recreated from
+		# the stale snapshot — and because it lands stamped exactly
+		# `started_at`, the cleanup below (which matches strictly older)
+		# leaves it alone. A reindex would therefore resurrect an erased
+		# transcript and keep it searchable until the next run, which is
+		# the failure this whole pass exists to prevent. Only the rows
+		# this run wrote can be affected, so only those are re-checked.
+		resurrected = self._remove_vanished_rows(doctype, written)
 
 		# Upserting the surviving rows is only half a repair. Documents
 		# this pass did not write have no row behind them any more — a
@@ -230,9 +242,38 @@ class OpenSearchProvider:
 		return {
 			"indexed": indexed,
 			"removed_stale": removed,
+			"removed_resurrected": resurrected,
 			"provider": self.name,
 			"index": index,
 		}
+
+	def _remove_vanished_rows(self, doctype: str, names: list[str], chunk: int = 500) -> int:
+		"""Undo writes for rows deleted while the reindex was running.
+
+		Re-checked in chunks rather than one `IN` clause over the whole
+		table: this runs against every indexed row, and a single query
+		listing them all is a needlessly large statement for a job whose
+		result is usually nothing.
+
+		This narrows the window rather than eliminating it — a row deleted
+		after the re-check is handled by its own incremental removal,
+		which now runs after this write and so wins. What is left is the
+		case where that removal itself fails, and the next reindex catches
+		it as a stale document.
+		"""
+		vanished: list[str] = []
+		for start in range(0, len(names), chunk):
+			window = names[start : start + chunk]
+			alive = set(
+				frappe.get_all(
+					doctype, filters={"name": ["in", window]}, pluck="name", ignore_permissions=True
+				)
+			)
+			vanished.extend(name for name in window if name not in alive)
+
+		for name in vanished:
+			self.remove_document(doctype, name)
+		return len(vanished)
 
 	def search(self, doctype: str, query: str, limit: int, owner: str | None = None) -> list[dict]:
 		source = SEARCH_SOURCES[doctype]
