@@ -70,17 +70,20 @@ def envelope(fn):
 		try:
 			data = fn(*args, **kwargs)
 			return {"ok": True, "data": data, "meta": {"correlationId": correlation_id}}
-		# A thrown validation or permission error is a *handled* outcome,
-		# and this codebase deliberately writes before throwing one:
-		# `save_placement_answer` finalises an expired attempt and then
-		# throws "Time is up", and `start_placement` finalises a timed-out
-		# attempt before it can throw on exhausted attempts. Rolling those
-		# back undoes the finalisation, and in the second case does so on
-		# every retry — the attempt never leaves "In Progress" again.
+		# Rollback is the default on every failure path, including handled
+		# ones. Returning a value puts the request on frappe's success
+		# path, which commits — so without this a call that wrote and then
+		# threw would keep the write. `record_restore_test` is the shape
+		# that matters: it saves the DR clock and then adds the audit
+		# comment, and committing the clock without its audit record is
+		# worse than failing outright.
 		#
-		# So no rollback here. Only the unforeseen branch discards work,
-		# where nothing has promised to have persisted anything.
+		# A caller that genuinely means to persist before throwing commits
+		# first and says so — see the timeout finalisation in
+		# lms_placement_attempt. Committed work is not ours to undo, which
+		# is what makes that an opt-in rather than an exception here.
 		except frappe.exceptions.ValidationError as e:
+			_discard_partial_work()
 			frappe.clear_messages()
 			frappe.local.response["http_status_code"] = 417
 			return {
@@ -89,6 +92,7 @@ def envelope(fn):
 				"meta": {"correlationId": correlation_id},
 			}
 		except frappe.PermissionError as e:
+			_discard_partial_work()
 			frappe.clear_messages()
 			frappe.local.response["http_status_code"] = 403
 			return {
