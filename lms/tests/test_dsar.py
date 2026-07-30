@@ -310,16 +310,42 @@ class TestDataSubjectRights(IntegrationTestCase):
 		anonymize_user(self.subject)
 		frappe.db.commit()
 
+		# Asserted against the configured scrub map rather than a list
+		# repeated here, so adding a field to the rules without clearing it
+		# fails this test instead of passing quietly.
+		configured = next(
+			s["scrub"] for s in PERSONAL_DATA_SOURCES if s["doctype"] == "LMS Zoom Settings"
+		)
 		row = frappe.db.get_value(
-			"LMS Zoom Settings",
-			settings.name,
-			["account_name", "client_secret", "enabled"],
-			as_dict=True,
+			"LMS Zoom Settings", settings.name, list(configured), as_dict=True
 		)
 		self.assertIsNotNone(row, "the settings row was deleted despite being referenceable")
-		self.assertFalse(row.account_name)
+		for field, expected in configured.items():
+			self.assertEqual(
+				row[field], expected, f"{field} was not scrubbed as the rules require"
+			)
 		self.assertFalse(row.client_secret, "the subject's credentials survived erasure")
-		self.assertFalse(row.enabled)
+
+	def test_conferencing_settings_hold_nothing_personal_beyond_the_scrub(self):
+		"""Every field on these doctypes is scrubbed, fetched, or a link.
+
+		A credential added later without a scrub rule would otherwise
+		survive an erasure silently.
+		"""
+		for doctype in ("LMS Zoom Settings", "LMS Google Meet Settings"):
+			source = next(s for s in PERSONAL_DATA_SOURCES if s["doctype"] == doctype)
+			scrubbed = set(source.get("scrub") or {})
+			accounted = scrubbed | {source["owner_field"]}
+			leftovers = []
+			for field in frappe.get_meta(doctype).fields:
+				if field.fieldname in accounted or field.fetch_from:
+					continue
+				if field.fieldtype in ("Section Break", "Column Break", "Tab Break"):
+					continue
+				leftovers.append(field.fieldname)
+			self.assertEqual(
+				leftovers, [], f"{doctype} has unscrubbed fields: {leftovers}"
+			)
 
 	def test_every_lms_doctype_linking_to_a_user_is_classified(self):
 		"""Registered, or explicitly excluded — never merely forgotten.

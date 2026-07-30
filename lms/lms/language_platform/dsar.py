@@ -196,10 +196,15 @@ def _pseudonym_is_free(candidate: str) -> bool:
 	whose username another account already holds, and the erasure would
 	then fail on the insert — after the scrub had begun.
 	"""
-	if frappe.db.exists("User", candidate):
-		return False
 	handle = candidate.partition("@")[0]
-	return not frappe.db.exists("User", {"username": handle})
+	taken = frappe.get_all(
+		"User",
+		or_filters={"name": candidate, "username": handle},
+		limit=1,
+		pluck="name",
+		ignore_permissions=True,
+	)
+	return not taken
 
 
 def _purge_speaking_audio(user: str, summary: dict):
