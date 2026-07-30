@@ -63,9 +63,60 @@ class ProvisioningError(RuntimeError):
 	pass
 
 
+# Flags whose *value* is a secret. Echoing a command is useful — an
+# operator needs to see what ran, and a failure needs to say which
+# command failed — but the value after these must never reach terminal
+# scrollback or a CI log, where it outlives the run and the person.
+#
+# Listed rather than derived from the parser, deliberately. Only two of
+# these are parser options: `--mariadb-root-password` and
+# `--root-password` are bench's, passed outward and never parsed here, so
+# a parser-derived set would omit exactly the two carrying the database
+# root password. The drift test covers the half that can be checked —
+# every password argument the parser defines must appear here.
+SECRET_FLAGS = frozenset(
+	{
+		"--admin-password",
+		"--db-root-password",
+		"--mariadb-root-password",
+		"--root-password",
+	}
+)
+
+REDACTED = "***"
+
+
+def redact_command(command: list[str]) -> str:
+	"""Render a command for display with secret values masked.
+
+	Only the rendering is masked; the list that actually runs is
+	untouched. Handles both `--flag value` and `--flag=value`, because
+	either form would otherwise leak.
+	"""
+	shown: list[str] = []
+	mask_next = False
+	for raw in command:
+		# Normalised once, up front: comparing the raw value in one branch
+		# and the string form in another would let a non-string token slip
+		# past the check that arms masking for the value after it.
+		token = str(raw)
+		if mask_next:
+			shown.append(REDACTED)
+			mask_next = False
+			continue
+		flag, sep, _value = token.partition("=")
+		if sep and flag in SECRET_FLAGS:
+			shown.append(f"{flag}={REDACTED}")
+			continue
+		shown.append(token)
+		if token in SECRET_FLAGS:
+			mask_next = True
+	return " ".join(shown)
+
+
 def run(command: list[str], *, dry_run: bool = False, check: bool = True) -> str:
 	"""Execute a command as an argument list, echoing it for the operator log."""
-	printable = " ".join(command)
+	printable = redact_command(command)
 	print(f"  $ {printable}")
 	if dry_run:
 		return ""
@@ -120,6 +171,10 @@ def provision(args) -> int:
 
 	# Generated here rather than taken as an argument so it never lands in
 	# shell history or a CI log echo.
+	# Whether this run invented the password decides whether it may be
+	# printed. One the caller supplied is already in their possession, so
+	# echoing it only copies it somewhere less safe.
+	password_was_generated = not args.admin_password
 	admin_password = args.admin_password or secrets.token_urlsafe(18)
 
 	if args.control_site:
@@ -177,11 +232,27 @@ def provision(args) -> int:
 		)
 
 	print(f"\nOK: tenant '{subdomain}' provisioned at https://{site}")
-	if not args.dry_run:
-		# Printed once, to the operator's terminal only. Store it in the
-		# password manager now; it is not recoverable from here.
+	if not args.dry_run and password_was_generated:
+		# Printed once and deliberately: a password this run invented has
+		# to reach the operator somehow, and is not recoverable afterwards.
+		#
+		# "Terminal only" is not something this can promise, though. Piped
+		# or run by a job, stdout is a file that outlives the run, so say
+		# so plainly rather than implying a privacy the output does not
+		# have.
+		if not sys.stdout.isatty():
+			print(
+				"\n  WARNING: output is not a terminal, so the password below is being "
+				"written to a file or log. Rotate it, or re-run with --admin-password "
+				"supplied from your secret store."
+			)
 		print(f"\n  Administrator password: {admin_password}")
 		print("  Store this in the team password manager - it is not saved anywhere.\n")
+	elif not args.dry_run:
+		# The advice above is only advice if taking it actually helps. A
+		# caller-supplied password printed here would land in the same log
+		# the caller moved it to a secret store to avoid.
+		print("\n  Administrator password: as supplied by the caller; not echoed.\n")
 		if args.admin_email:
 			print(f"  An invite was sent to {args.admin_email} for the institution admin.\n")
 	return 0
