@@ -34,6 +34,7 @@ from lms.lms.language_platform.privacy_rules import (
 	PERSONAL_DATA_SOURCES,
 	anonymized_email,
 	build_export_payload,
+	denormalized_scrub_values,
 	user_scrub_values,
 )
 from lms.lms.language_platform.search import remove_document as remove_from_search_index
@@ -102,9 +103,10 @@ def anonymize_user(user: str) -> dict:
 		if not frappe.db.exists("DocType", doctype):
 			continue
 
+		owner_field = source["owner_field"]
 		names = frappe.get_all(
 			doctype,
-			filters={source["owner_field"]: user},
+			filters={owner_field: user},
 			pluck="name",
 			ignore_permissions=True,
 		)
@@ -124,7 +126,12 @@ def anonymize_user(user: str) -> dict:
 			summary[f"{doctype} (deleted)"] = len(names)
 			continue
 
-		if scrub := source.get("scrub"):
+		# Copies of the person's own profile, duplicated onto the row by
+		# fetch_from. The rename below fixes the link; nothing fixes these.
+		scrub = dict(source.get("scrub") or {})
+		scrub.update(denormalized_scrub_values(user, _fetched_user_fields(doctype, owner_field)))
+
+		if scrub:
 			for name in names:
 				frappe.db.set_value(doctype, name, scrub, update_modified=False)
 				if searchable:
@@ -141,6 +148,44 @@ def anonymize_user(user: str) -> dict:
 
 	frappe.db.commit()
 	return summary
+
+
+def _fetched_user_fields(doctype: str, owner_field: str) -> dict:
+	"""Fields on ``doctype`` that copy a value from the owner's User row.
+
+	Read from the doctype metadata rather than listed, so a denormalised
+	field added later is covered without anyone remembering to come here.
+	"""
+	fetched = {}
+	for field in frappe.get_meta(doctype).fields:
+		if not field.fetch_from:
+			continue
+		link_field, _, source_field = field.fetch_from.partition(".")
+		if link_field == owner_field and source_field:
+			fetched[field.fieldname] = source_field
+	return fetched
+
+
+def _unique_pseudonym(user: str) -> str:
+	"""A pseudonymous address not already taken.
+
+	`anonymized_email` is deterministic so a subject erased in batches
+	resolves to one pseudonym. But an address can be registered again
+	after an erasure, and erasing the new account would collide with the
+	old pseudonym — the rename then fails, or is skipped and the account
+	stays under its real address while the summary claims otherwise.
+	Later erasures of the same address get a suffix rather than silently
+	doing nothing.
+	"""
+	base = anonymized_email(user)
+	if not frappe.db.exists("User", base):
+		return base
+	local, _, domain = base.partition("@")
+	for suffix in range(2, 1000):
+		candidate = f"{local}-{suffix}@{domain}"
+		if not frappe.db.exists("User", candidate):
+			return candidate
+	raise frappe.ValidationError(_("Could not allocate a free pseudonym for this subject."))
 
 
 def _purge_speaking_audio(user: str, summary: dict):
@@ -183,10 +228,18 @@ def _scrub_user_record(user: str, summary: dict) -> str:
 
 	Returns the new user id so callers can report it.
 	"""
-	frappe.db.set_value("User", user, user_scrub_values(user), update_modified=False)
+	new_user = _unique_pseudonym(user)
+	values = user_scrub_values(user)
+	# Every identity value is derived from the pseudonym actually chosen,
+	# not from the deterministic handle. `email` and `username` are both
+	# unique columns, so a repeat erasure of a re-registered address would
+	# otherwise collide on whichever the scrub wrote first — and it is the
+	# username that trips, several statements after the email looked fine.
+	handle = new_user.partition("@")[0]
+	values.update({"email": new_user, "username": handle, "first_name": handle, "full_name": handle})
+	frappe.db.set_value("User", user, values, update_modified=False)
 
-	new_user = anonymized_email(user)
-	if new_user != user and not frappe.db.exists("User", new_user):
+	if new_user != user:
 		# ignore_permissions because erasure runs under the approval of the
 		# request document, not the caller's own rights over the subject.
 		rename_doc(

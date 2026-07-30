@@ -179,6 +179,101 @@ class TestDataSubjectRights(IntegrationTestCase):
 		for doctype, rows in payload["records"].items():
 			self.assertEqual(payload["counts"][doctype], len(rows))
 
+	def test_denormalised_copies_of_the_name_are_scrubbed(self):
+		"""A rename fixes the link and not the copies beside it.
+
+		`fetch_from` duplicates the member's name onto the row at write
+		time, so an erasure that only renamed left the subject's name in
+		records it reported as pseudonymous.
+		"""
+		progress = frappe.get_doc(
+			{
+				"doctype": "LMS Course Progress",
+				"member": self.subject,
+				"course": self.course.name,
+				"status": "Complete",
+			}
+		).insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(
+			lambda: frappe.db.exists("LMS Course Progress", progress.name)
+			and frappe.delete_doc(
+				"LMS Course Progress", progress.name, force=True, ignore_permissions=True
+			)
+		)
+
+		before = frappe.db.get_value("LMS Course Progress", progress.name, "member_name")
+		self.assertEqual(before, "Data Subject", "fixture did not denormalise the name")
+
+		anonymize_user(self.subject)
+		frappe.db.commit()
+
+		after = frappe.db.get_value("LMS Course Progress", progress.name, "member_name")
+		self.assertNotEqual(after, "Data Subject", "the subject's name survived erasure")
+
+	def test_a_second_erasure_of_a_reused_address_gets_its_own_pseudonym(self):
+		"""An address can be registered again after being erased.
+
+		The deterministic pseudonym is then already taken, and the rename
+		either fails on the unique-email constraint or is skipped —
+		leaving the new account under its real address while the summary
+		says otherwise.
+		"""
+		anonymize_user(self.subject)
+		frappe.db.commit()
+		self.assertTrue(frappe.db.exists("User", self.pseudonym))
+
+		frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": self.subject,
+				"first_name": "Data",
+				"last_name": "Subject",
+				"send_welcome_email": 0,
+			}
+		).insert(ignore_permissions=True)
+		frappe.db.commit()
+
+		summary = anonymize_user(self.subject)
+		frappe.db.commit()
+		second = summary["Pseudonym"]
+		self.addCleanup(
+			lambda: frappe.db.exists("User", second)
+			and frappe.delete_doc("User", second, force=True, ignore_permissions=True)
+		)
+
+		self.assertNotEqual(second, self.pseudonym, "the two subjects share one pseudonym")
+		self.assertFalse(
+			frappe.db.exists("User", self.subject), "the re-registered account kept its address"
+		)
+
+	def test_every_lms_doctype_linking_to_a_user_is_classified(self):
+		"""Registered, or explicitly excluded — never merely forgotten.
+
+		The registry was hand-written and missed sources twice. This makes
+		a new User link fail the suite until someone decides what it is.
+		"""
+		from lms.lms.language_platform.privacy_rules import NON_SUBJECT_USER_LINKS
+
+		registered = {s["doctype"] for s in PERSONAL_DATA_SOURCES}
+		unclassified = []
+		for doctype in frappe.get_all("DocType", filters={"module": ["like", "%LMS%"]}, pluck="name"):
+			if doctype in registered or doctype in NON_SUBJECT_USER_LINKS:
+				continue
+			try:
+				meta = frappe.get_meta(doctype)
+			except Exception:
+				continue
+			if any(f.fieldtype == "Link" and f.options == "User" for f in meta.fields):
+				unclassified.append(doctype)
+
+		self.assertEqual(
+			sorted(unclassified),
+			[],
+			"these link to User but are neither registered as personal data nor "
+			f"listed as staff assignments: {sorted(unclassified)}",
+		)
+
 	def test_the_registry_names_only_real_doctypes(self):
 		"""A typo would silently drop a source from export and erasure."""
 		unknown = [

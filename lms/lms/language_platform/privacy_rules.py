@@ -63,7 +63,28 @@ PERSONAL_DATA_SOURCES = [
 	# Disability-related settings: no academic value, and the most
 	# sensitive inference in the set.
 	{"doctype": "LMS Accessibility Preference", "owner_field": "member", "purge": True},
+	{"doctype": "LMS Certificate Evaluation", "owner_field": "member"},
+	{"doctype": "LMS Live Class Participant", "owner_field": "member"},
+	{"doctype": "LMS Program Member", "owner_field": "member"},
+	{"doctype": "LMS Course Interest", "owner_field": "user", "purge": True},
+	# Personal conferencing credentials, not academic record.
+	{"doctype": "LMS Google Meet Settings", "owner_field": "member", "purge": True},
+	{"doctype": "LMS Zoom Settings", "owner_field": "member", "purge": True},
 ]
+
+# Doctypes that link to User but not to a *data subject*: they record who
+# teaches, evaluates or mentors, which is a staffing assignment rather
+# than personal data held about a learner. Listed explicitly so the
+# coverage test can tell "considered and excluded" from "overlooked" —
+# every LMS doctype with a User link must appear in one list or the other.
+NON_SUBJECT_USER_LINKS = {
+	"Course Evaluator": "evaluator — staff assignment",
+	"Course Instructor": "instructor — staff assignment",
+	"LMS Course Mentor Mapping": "mentor — staff assignment",
+	"LMS Live Class": "host — staff assignment",
+	"LMS Batch Timetable": "reference to a session's instructor",
+	"LMS Enrollment": "handled via `member`; see the registry entry above",
+}
 
 # User fields carrying identity, blanked on erasure.
 USER_SCRUB_FIELDS = [
@@ -80,6 +101,29 @@ USER_SCRUB_FIELDS = [
 	"interest",
 	"birth_date",
 ]
+
+
+def denormalized_scrub_values(user: str, fetch_map: dict) -> dict:
+	"""Replacements for fields that *copy* User data onto another row.
+
+	Frappe's ``fetch_from`` duplicates a value at write time — a
+	submission stores ``member_name`` alongside its ``member`` link, and
+	similarly the username and profile image. Renaming the User updates
+	the link and leaves those copies untouched, so an erasure that only
+	renamed would report a row pseudonymous while it still carried the
+	subject's name and photograph.
+
+	``fetch_map`` maps the local field to the User field it copies
+	(``{"member_name": "full_name"}``), which the caller reads from the
+	doctype metadata rather than a hand-written list — a new denormalised
+	field is then covered the day it is added.
+	"""
+	scrubbed = user_scrub_values(user)
+	return {
+		local: scrubbed.get(source_field)
+		for local, source_field in fetch_map.items()
+		if source_field in scrubbed
+	}
 
 
 def anonymized_handle(user: str) -> str:
