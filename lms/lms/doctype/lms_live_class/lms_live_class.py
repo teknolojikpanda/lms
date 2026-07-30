@@ -215,11 +215,19 @@ def update_attendance():
 		# so a class that raises is selected again on the next run — without
 		# this, one unreachable meeting blocks attendance for every other
 		# class, every hour, indefinitely.
+		# The savepoint matters as much as the isolation. `create_attendance`
+		# inserts participants one at a time, so a failure partway leaves
+		# some inserted while `attendees` stays unset — the class is then
+		# selected again next hour and those participants are inserted a
+		# second time, and again every hour after that.
+		savepoint = f"attendance_{live_class.name}"
 		try:
+			frappe.db.savepoint(savepoint)
 			attendance_data = get_attendance(live_class)
 			create_attendance(live_class, attendance_data)
 			update_attendees_count(live_class, attendance_data)
 		except Exception:
+			frappe.db.rollback(save_point=savepoint)
 			frappe.log_error(
 				title="Live class attendance collection failed",
 				message=f"live_class={live_class.name}\n{frappe.get_traceback()}",

@@ -13,7 +13,9 @@ from frappe.tests import IntegrationTestCase
 
 from lms.lms.language_platform.dsar import anonymize_user, collect_user_data
 from lms.lms.language_platform.privacy_rules import (
+	ERASED_MARKER,
 	PERSONAL_DATA_SOURCES,
+	UNIQUE_ERASED_MARKER,
 	anonymized_email,
 )
 
@@ -316,17 +318,92 @@ class TestDataSubjectRights(IntegrationTestCase):
 		configured = next(
 			s["scrub"] for s in PERSONAL_DATA_SOURCES if s["doctype"] == "LMS Zoom Settings"
 		)
-		row = frappe.db.get_value(
-			"LMS Zoom Settings", settings.name, list(configured), as_dict=True
+		# Found by owner, not by name: `account_name` is the autoname
+		# field, so scrubbing it renames the document.
+		renamed = frappe.db.get_value("LMS Zoom Settings", {"member": self.pseudonym}, "name")
+		self.assertTrue(renamed, "the settings row was deleted despite being referenceable")
+		self.assertNotEqual(renamed, settings.name, "the erased account name survived as the key")
+		self.addCleanup(
+			lambda: frappe.db.exists("LMS Zoom Settings", renamed)
+			and frappe.delete_doc("LMS Zoom Settings", renamed, force=True, ignore_permissions=True)
 		)
-		self.assertIsNotNone(row, "the settings row was deleted despite being referenceable")
+		row = frappe.db.get_value("LMS Zoom Settings", renamed, list(configured), as_dict=True)
 		for field, expected in configured.items():
-			self.assertEqual(
-				row[field], expected, f"{field} was not scrubbed as the rules require"
-			)
+			if expected is UNIQUE_ERASED_MARKER:
+				# Resolved per row, so only its shape can be asserted.
+				self.assertTrue(
+					str(row[field]).startswith(f"{ERASED_MARKER}-"),
+					f"{field} did not get a unique erased marker: {row[field]!r}",
+				)
+			else:
+				self.assertEqual(
+					row[field], expected, f"{field} was not scrubbed as the rules require"
+				)
 		self.assertNotIn(
 			"secret-123", frappe.as_json(row), "the subject's credentials survived erasure"
 		)
+
+	def test_two_scrubbed_zoom_accounts_do_not_collide(self):
+		"""`account_name` is unique, so a constant marker fails the second.
+
+		It is also the autoname field, so scrubbing the column alone would
+		leave the erased account name sitting in the primary key.
+		"""
+		second = f"dsar2-{self.hash}@example.com"
+		frappe.get_doc(
+			{"doctype": "User", "email": second, "first_name": "Other", "send_welcome_email": 0}
+		).insert(ignore_permissions=True)
+		self.addCleanup(
+			lambda: [
+				frappe.delete_doc("User", u, force=True, ignore_permissions=True)
+				for u in (second, anonymized_email(second))
+				if frappe.db.exists("User", u)
+			]
+		)
+
+		names = []
+		for owner, label in ((self.subject, "first"), (second, "second")):
+			doc = frappe.get_doc(
+				{
+					"doctype": "LMS Zoom Settings",
+					"member": owner,
+					"account_name": f"zoom-{label}-{self.hash}",
+					"account_id": "a",
+					"client_id": "c",
+					"client_secret": "s",
+					"enabled": 1,
+				}
+			).insert(ignore_permissions=True)
+			names.append(doc.name)
+		frappe.db.commit()
+
+		anonymize_user(self.subject)
+		anonymize_user(second)  # must not collide on account_name
+		frappe.db.commit()
+
+		# Scoped to these two subjects: other tests scrub Zoom rows too, and
+		# a bare `erased-%` count would pick theirs up.
+		pseudonyms = [self.pseudonym, anonymized_email(second)]
+		surviving = frappe.get_all(
+			"LMS Zoom Settings",
+			filters={"member": ["in", pseudonyms]},
+			pluck="account_name",
+		)
+		self.addCleanup(
+			lambda: [
+				frappe.delete_doc("LMS Zoom Settings", n, force=True, ignore_permissions=True)
+				for n in frappe.get_all(
+					"LMS Zoom Settings", filters={"member": ["in", pseudonyms]}, pluck="name"
+				)
+			]
+		)
+		self.assertEqual(len(surviving), 2, "the two scrubbed rows did not both survive")
+		self.assertEqual(len(set(surviving)), 2, "both rows took the same marker")
+		for original in names:
+			self.assertFalse(
+				frappe.db.exists("LMS Zoom Settings", original),
+				"the erased account name survived as the primary key",
+			)
 
 	def test_conferencing_settings_hold_nothing_personal_beyond_the_scrub(self):
 		"""Every field on these doctypes is scrubbed, fetched, or a link.

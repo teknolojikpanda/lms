@@ -31,7 +31,9 @@ from frappe.model.rename_doc import rename_doc
 from frappe.utils import now_datetime
 
 from lms.lms.language_platform.privacy_rules import (
+	ERASED_MARKER,
 	PERSONAL_DATA_SOURCES,
+	UNIQUE_ERASED_MARKER,
 	anonymized_email,
 	build_export_payload,
 	denormalized_scrub_values,
@@ -133,7 +135,9 @@ def anonymize_user(user: str) -> dict:
 
 		if scrub:
 			for name in names:
-				frappe.db.set_value(doctype, name, scrub, update_modified=False)
+				resolved = _resolve_row_scrub(scrub)
+				frappe.db.set_value(doctype, name, resolved, update_modified=False)
+				name = _rename_if_named_by_a_scrubbed_field(doctype, name, resolved)
 				if searchable:
 					remove_from_search_index(doctype, name)
 			summary[f"{doctype} (scrubbed)"] = len(names)
@@ -148,6 +152,35 @@ def anonymize_user(user: str) -> dict:
 
 	frappe.db.commit()
 	return summary
+
+
+def _resolve_row_scrub(scrub: dict) -> dict:
+	"""Give this row its own value for any uniquely-marked field."""
+	return {
+		field: (
+			f"{ERASED_MARKER}-{frappe.generate_hash(length=10)}"
+			if value is UNIQUE_ERASED_MARKER
+			else value
+		)
+		for field, value in scrub.items()
+	}
+
+
+def _rename_if_named_by_a_scrubbed_field(doctype: str, name: str, resolved: dict) -> str:
+	"""Rename a document whose primary key is a field we just scrubbed.
+
+	With ``autoname: field:x``, the document name *is* that value — so
+	scrubbing the column alone leaves the erased value sitting in the
+	primary key, and in every Link that points at it.
+	"""
+	autoname = frappe.get_meta(doctype).autoname or ""
+	if not autoname.startswith("field:"):
+		return name
+	new_name = resolved.get(autoname.split(":", 1)[1])
+	if not new_name or new_name == name:
+		return name
+	rename_doc(doctype, name, new_name, force=True, ignore_permissions=True, show_alert=False)
+	return new_name
 
 
 def _fetched_user_fields(doctype: str, owner_field: str) -> dict:

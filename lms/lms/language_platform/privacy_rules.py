@@ -25,6 +25,24 @@ from datetime import datetime, timedelta
 # saved, so it carries a marker instead of nothing.
 ERASED_MARKER = "erased"
 
+
+class _UniqueErasedMarker:
+	"""A marker resolved to a distinct value for each row it scrubs.
+
+	A constant is wrong wherever the column carries a unique index: the
+	second row erased collides with the first and the update fails partway
+	through an anonymisation. Fields declared with this get a fresh value
+	per row instead, and if the field also names the document, the
+	document is renamed to match — otherwise the primary key keeps the
+	value the scrub just removed from the column.
+	"""
+
+	def __repr__(self) -> str:  # pragma: no cover - debugging aid
+		return "<unique erased marker>"
+
+
+UNIQUE_ERASED_MARKER = _UniqueErasedMarker()
+
 PERSONAL_DATA_SOURCES = [
 	# --- academic record: retained, pseudonymised by the User rename -----
 	{"doctype": "LMS Enrollment", "owner_field": "member"},
@@ -90,7 +108,8 @@ PERSONAL_DATA_SOURCES = [
 		"doctype": "LMS Zoom Settings",
 		"owner_field": "member",
 		"scrub": {
-			"account_name": ERASED_MARKER,
+			# unique, and the autoname field: see _UniqueErasedMarker
+			"account_name": UNIQUE_ERASED_MARKER,
 			"account_id": ERASED_MARKER,
 			"client_id": ERASED_MARKER,
 			"client_secret": ERASED_MARKER,
