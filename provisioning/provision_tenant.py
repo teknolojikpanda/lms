@@ -63,9 +63,54 @@ class ProvisioningError(RuntimeError):
 	pass
 
 
+# Flags whose *value* is a secret. Echoing a command is useful — an
+# operator needs to see what ran, and a failure needs to say which
+# command failed — but the value after these must never reach terminal
+# scrollback or a CI log, where it outlives the run and the person.
+#
+# Keep in step with the parser: `--admin-password` and
+# `--db-root-password` are ours, `--mariadb-root-password` and
+# `--root-password` are what bench expects. A test asserts every
+# password argument the parser defines is listed here.
+SECRET_FLAGS = frozenset(
+	{
+		"--admin-password",
+		"--db-root-password",
+		"--mariadb-root-password",
+		"--root-password",
+	}
+)
+
+REDACTED = "***"
+
+
+def redact_command(command: list[str]) -> str:
+	"""Render a command for display with secret values masked.
+
+	Only the rendering is masked; the list that actually runs is
+	untouched. Handles both `--flag value` and `--flag=value`, because
+	either form would otherwise leak.
+	"""
+	shown: list[str] = []
+	mask_next = False
+	for token in command:
+		if mask_next:
+			shown.append(REDACTED)
+			mask_next = False
+			continue
+		flag, sep, _value = str(token).partition("=")
+		if sep and flag in SECRET_FLAGS:
+			shown.append(f"{flag}={REDACTED}")
+			continue
+		shown.append(str(token))
+		if token in SECRET_FLAGS:
+			mask_next = True
+	return " ".join(shown)
+
+
 def run(command: list[str], *, dry_run: bool = False, check: bool = True) -> str:
 	"""Execute a command as an argument list, echoing it for the operator log."""
-	printable = " ".join(command)
+	printable = redact_command(command)
 	print(f"  $ {printable}")
 	if dry_run:
 		return ""
@@ -178,8 +223,21 @@ def provision(args) -> int:
 
 	print(f"\nOK: tenant '{subdomain}' provisioned at https://{site}")
 	if not args.dry_run:
-		# Printed once, to the operator's terminal only. Store it in the
-		# password manager now; it is not recoverable from here.
+		# Printed once and deliberately: a generated password has to reach
+		# the operator somehow, and it is not recoverable afterwards.
+		#
+		# "Terminal only" is not something this can promise, though. Piped
+		# or run by a job, stdout is a file that outlives the run, so say
+		# so plainly rather than implying a privacy the output does not
+		# have. A caller that provisions non-interactively should pass
+		# --admin-password from its own secret store instead of having one
+		# generated and then scraping it back out of a log.
+		if not sys.stdout.isatty():
+			print(
+				"\n  WARNING: output is not a terminal, so the password below is being "
+				"written to a file or log. Rotate it, or re-run with --admin-password "
+				"supplied from your secret store."
+			)
 		print(f"\n  Administrator password: {admin_password}")
 		print("  Store this in the team password manager - it is not saved anywhere.\n")
 		if args.admin_email:

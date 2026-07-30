@@ -35,6 +35,119 @@ def _load_cli() -> types.ModuleType:
 cli = _load_cli()
 
 
+class TestSecretRedaction(unittest.TestCase):
+	"""Secrets must not reach terminal scrollback or a CI log.
+
+	`run` echoes every command and repeats it in failure messages, which
+	is worth keeping — an operator needs to see what ran. But the value
+	after a password flag outlives the run in whatever captured it, so
+	only the rendering may carry it.
+	"""
+
+	ADMIN = "s3cret-admin-pw"
+	ROOT = "s3cret-root-pw"
+
+	def _command(self):
+		return [
+			"bench",
+			"new-site",
+			"ankara-koleji.dilplatformu.com",
+			"--admin-password",
+			self.ADMIN,
+			"--mariadb-root-password",
+			self.ROOT,
+			"--no-mariadb-socket",
+		]
+
+	def test_secret_values_are_masked(self):
+		shown = cli.redact_command(self._command())
+		self.assertNotIn(self.ADMIN, shown)
+		self.assertNotIn(self.ROOT, shown)
+
+	def test_the_flags_themselves_are_still_visible(self):
+		"""Redaction must not make the log useless."""
+		shown = cli.redact_command(self._command())
+		self.assertIn("--admin-password", shown)
+		self.assertIn("--mariadb-root-password", shown)
+		self.assertIn("bench new-site", shown)
+		self.assertIn("ankara-koleji.dilplatformu.com", shown)
+
+	def test_the_equals_form_is_masked_too(self):
+		shown = cli.redact_command(["bench", f"--admin-password={self.ADMIN}"])
+		self.assertNotIn(self.ADMIN, shown)
+		self.assertIn("--admin-password=", shown)
+
+	def test_a_value_that_merely_follows_a_normal_flag_is_kept(self):
+		shown = cli.redact_command(["bench", "--site", "ankara.example.com"])
+		self.assertIn("ankara.example.com", shown)
+
+	def test_the_executed_command_is_not_altered(self):
+		"""Only the display is redacted; the real call still needs the value."""
+		command = self._command()
+		cli.redact_command(command)
+		self.assertIn(self.ADMIN, command)
+		self.assertIn(self.ROOT, command)
+
+	def test_the_echoed_command_does_not_carry_the_secret(self):
+		"""The leak on every successful run, not just failures.
+
+		`run` echoes before executing, so this line is written whether or
+		not anything goes wrong — it is the path that put passwords into
+		operator scrollback in the first place.
+		"""
+		import contextlib
+		import io as _io
+
+		buffer = _io.StringIO()
+		with contextlib.redirect_stdout(buffer):
+			cli.run(self._command(), dry_run=True)
+		echoed = buffer.getvalue()
+
+		self.assertIn("bench new-site", echoed, "the command was not echoed at all")
+		self.assertNotIn(self.ADMIN, echoed)
+		self.assertNotIn(self.ROOT, echoed)
+
+	def test_failures_do_not_quote_the_secret(self):
+		"""The error path repeats the command, and used to repeat the secret."""
+		captured = {}
+
+		class _Result:
+			returncode = 1
+			stdout = ""
+			stderr = "bench: something went wrong"
+
+		real = cli.subprocess.run
+		cli.subprocess.run = lambda *a, **k: _Result()
+		try:
+			with self.assertRaises(cli.ProvisioningError) as caught:
+				cli.run(self._command())
+			captured["message"] = str(caught.exception)
+		finally:
+			cli.subprocess.run = real
+
+		self.assertNotIn(self.ADMIN, captured["message"])
+		self.assertNotIn(self.ROOT, captured["message"])
+		self.assertIn("Command failed (1)", captured["message"])
+
+	def test_every_password_argument_is_declared_secret(self):
+		"""The drift guard: a new password flag must be added to SECRET_FLAGS.
+
+		Redaction is an allowlist, so a flag nobody registers leaks
+		silently — which is exactly how the original leak went unnoticed.
+		"""
+		parser = cli.build_parser()
+		password_flags = {
+			option
+			for action in parser._actions
+			for option in action.option_strings
+			if "password" in option
+		}
+		missing = sorted(password_flags - cli.SECRET_FLAGS)
+		self.assertEqual(
+			missing, [], f"these password flags would be echoed in full: {missing}"
+		)
+
+
 class TestReportedArtifacts(unittest.TestCase):
 	"""Backup verification must check the file *this* run wrote.
 
