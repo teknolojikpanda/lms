@@ -20,6 +20,29 @@ from datetime import datetime, timedelta
 #   owner_field: column linking the row to the person
 #   purge:       delete the row entirely on erasure (personal free text)
 #   scrub:       field -> replacement value applied on erasure
+# Stands in for a mandatory field whose real value was personal. Emptying
+# such a field would leave a row that fails validation the next time it is
+# saved, so it carries a marker instead of nothing.
+ERASED_MARKER = "erased"
+
+
+class _UniqueErasedMarker:
+	"""A marker resolved to a distinct value for each row it scrubs.
+
+	A constant is wrong wherever the column carries a unique index: the
+	second row erased collides with the first and the update fails partway
+	through an anonymisation. Fields declared with this get a fresh value
+	per row instead, and if the field also names the document, the
+	document is renamed to match — otherwise the primary key keeps the
+	value the scrub just removed from the column.
+	"""
+
+	def __repr__(self) -> str:  # pragma: no cover - debugging aid
+		return "<unique erased marker>"
+
+
+UNIQUE_ERASED_MARKER = _UniqueErasedMarker()
+
 PERSONAL_DATA_SOURCES = [
 	# --- academic record: retained, pseudonymised by the User rename -----
 	{"doctype": "LMS Enrollment", "owner_field": "member"},
@@ -67,9 +90,32 @@ PERSONAL_DATA_SOURCES = [
 	{"doctype": "LMS Live Class Participant", "owner_field": "member"},
 	{"doctype": "LMS Program Member", "owner_field": "member"},
 	{"doctype": "LMS Course Interest", "owner_field": "user", "purge": True},
-	# Personal conferencing credentials, not academic record.
-	{"doctype": "LMS Google Meet Settings", "owner_field": "member", "purge": True},
-	{"doctype": "LMS Zoom Settings", "owner_field": "member", "purge": True},
+	# Personal conferencing credentials. Scrubbed rather than purged
+	# because LMS Batch and LMS Live Class hold Link fields to these rows:
+	# deleting one raises a link-exists error and fails the whole erasure
+	# request. Emptying the credentials removes the personal content and
+	# leaves the batch's reference intact.
+	{
+		"doctype": "LMS Google Meet Settings",
+		"owner_field": "member",
+		"scrub": {"account_name": None, "google_calendar": None, "enabled": 0},
+	},
+	# account_id, client_id and client_secret are mandatory on this
+	# doctype, so they are replaced with a marker rather than emptied:
+	# db.set_value bypasses validation, but a NULL would leave a row that
+	# fails the next time anything saves it.
+	{
+		"doctype": "LMS Zoom Settings",
+		"owner_field": "member",
+		"scrub": {
+			# unique, and the autoname field: see _UniqueErasedMarker
+			"account_name": UNIQUE_ERASED_MARKER,
+			"account_id": ERASED_MARKER,
+			"client_id": ERASED_MARKER,
+			"client_secret": ERASED_MARKER,
+			"enabled": 0,
+		},
+	},
 ]
 
 # Doctypes that link to User but not to a *data subject*: they record who

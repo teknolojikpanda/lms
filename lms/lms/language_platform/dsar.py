@@ -31,7 +31,9 @@ from frappe.model.rename_doc import rename_doc
 from frappe.utils import now_datetime
 
 from lms.lms.language_platform.privacy_rules import (
+	ERASED_MARKER,
 	PERSONAL_DATA_SOURCES,
+	UNIQUE_ERASED_MARKER,
 	anonymized_email,
 	build_export_payload,
 	denormalized_scrub_values,
@@ -133,7 +135,9 @@ def anonymize_user(user: str) -> dict:
 
 		if scrub:
 			for name in names:
-				frappe.db.set_value(doctype, name, scrub, update_modified=False)
+				resolved = _resolve_row_scrub(scrub)
+				frappe.db.set_value(doctype, name, resolved, update_modified=False)
+				name = _rename_if_named_by_a_scrubbed_field(doctype, name, resolved)
 				if searchable:
 					remove_from_search_index(doctype, name)
 			summary[f"{doctype} (scrubbed)"] = len(names)
@@ -148,6 +152,35 @@ def anonymize_user(user: str) -> dict:
 
 	frappe.db.commit()
 	return summary
+
+
+def _resolve_row_scrub(scrub: dict) -> dict:
+	"""Give this row its own value for any uniquely-marked field."""
+	return {
+		field: (
+			f"{ERASED_MARKER}-{frappe.generate_hash(length=10)}"
+			if value is UNIQUE_ERASED_MARKER
+			else value
+		)
+		for field, value in scrub.items()
+	}
+
+
+def _rename_if_named_by_a_scrubbed_field(doctype: str, name: str, resolved: dict) -> str:
+	"""Rename a document whose primary key is a field we just scrubbed.
+
+	With ``autoname: field:x``, the document name *is* that value — so
+	scrubbing the column alone leaves the erased value sitting in the
+	primary key, and in every Link that points at it.
+	"""
+	autoname = frappe.get_meta(doctype).autoname or ""
+	if not autoname.startswith("field:"):
+		return name
+	new_name = resolved.get(autoname.split(":", 1)[1])
+	if not new_name or new_name == name:
+		return name
+	rename_doc(doctype, name, new_name, force=True, ignore_permissions=True, show_alert=False)
+	return new_name
 
 
 def _fetched_user_fields(doctype: str, owner_field: str) -> dict:
@@ -178,14 +211,33 @@ def _unique_pseudonym(user: str) -> str:
 	doing nothing.
 	"""
 	base = anonymized_email(user)
-	if not frappe.db.exists("User", base):
+	if _pseudonym_is_free(base):
 		return base
 	local, _, domain = base.partition("@")
 	for suffix in range(2, 1000):
 		candidate = f"{local}-{suffix}@{domain}"
-		if not frappe.db.exists("User", candidate):
+		if _pseudonym_is_free(candidate):
 			return candidate
 	raise frappe.ValidationError(_("Could not allocate a free pseudonym for this subject."))
+
+
+def _pseudonym_is_free(candidate: str) -> bool:
+	"""Both unique columns must be free, not just the primary key.
+
+	The scrub writes the handle to `username`, which carries its own
+	unique index. Checking only the User name would accept a candidate
+	whose username another account already holds, and the erasure would
+	then fail on the insert — after the scrub had begun.
+	"""
+	handle = candidate.partition("@")[0]
+	taken = frappe.get_all(
+		"User",
+		or_filters={"name": candidate, "username": handle},
+		limit=1,
+		pluck="name",
+		ignore_permissions=True,
+	)
+	return not taken
 
 
 def _purge_speaking_audio(user: str, summary: dict):

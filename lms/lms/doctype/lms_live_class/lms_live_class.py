@@ -202,9 +202,36 @@ def update_attendance():
 	)
 
 	for live_class in past_live_classes:
-		attendance_data = get_attendance(live_class)
-		create_attendance(live_class, attendance_data)
-		update_attendees_count(live_class, attendance_data)
+		# A disabled Zoom account cannot be authenticated, so this class is
+		# not collectable and never will be. Erasure disables the account of
+		# a subject who asked to be forgotten, which makes this the ordinary
+		# case rather than a rare one.
+		if live_class.zoom_account and not frappe.db.get_value(
+			"LMS Zoom Settings", live_class.zoom_account, "enabled"
+		):
+			continue
+
+		# Isolated per class. `attendees` stays unset when collection fails,
+		# so a class that raises is selected again on the next run — without
+		# this, one unreachable meeting blocks attendance for every other
+		# class, every hour, indefinitely.
+		# The savepoint matters as much as the isolation. `create_attendance`
+		# inserts participants one at a time, so a failure partway leaves
+		# some inserted while `attendees` stays unset — the class is then
+		# selected again next hour and those participants are inserted a
+		# second time, and again every hour after that.
+		savepoint = f"attendance_{live_class.name}"
+		try:
+			frappe.db.savepoint(savepoint)
+			attendance_data = get_attendance(live_class)
+			create_attendance(live_class, attendance_data)
+			update_attendees_count(live_class, attendance_data)
+		except Exception:
+			frappe.db.rollback(save_point=savepoint)
+			frappe.log_error(
+				title="Live class attendance collection failed",
+				message=f"live_class={live_class.name}\n{frappe.get_traceback()}",
+			)
 
 
 def get_attendance(live_class):
