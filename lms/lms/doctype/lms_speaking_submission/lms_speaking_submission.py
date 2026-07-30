@@ -83,6 +83,24 @@ def get_permission_query_conditions(user=None):
 	return f"""(`tabLMS Speaking Submission`.`member` = {frappe.db.escape(user)})"""
 
 
+def has_permission(doc, ptype="read", user=None):
+	"""Per-document gate mirroring the list filter above.
+
+	Matters more here than elsewhere: these rows carry the recording, the
+	transcript and the rubric feedback, so a direct read by name would
+	expose another student's speech and assessment.
+	"""
+	user = user or frappe.session.user
+	if (
+		user == "Administrator"
+		or has_moderator_role(user)
+		or has_course_instructor_role(user)
+		or has_evaluator_role(user)
+	):
+		return True
+	return doc.member == user
+
+
 def _can_grade() -> bool:
 	return has_moderator_role() or has_course_instructor_role() or has_evaluator_role()
 

@@ -186,7 +186,13 @@ class TestSpeakingPipelineFailure(IntegrationTestCase):
 		self.enqueue.reset_mock()
 
 		self.assertNotIn(name, dispatch_due_retries()["dispatched"])
-		self.assertEqual(self.enqueue.call_count, 0)
+		# Asserted about this submission, not the total call count: the
+		# dispatcher sweeps the whole site, so any unrelated row that is
+		# legitimately due would otherwise fail a test that has nothing to
+		# do with it.
+		self.assertNotIn(
+			name, [c.kwargs.get("submission_name") for c in self.enqueue.call_args_list]
+		)
 
 	def test_dispatcher_enqueues_a_submission_whose_backoff_elapsed(self):
 		name = self._submission(status="Transcribing", retry_count=0)

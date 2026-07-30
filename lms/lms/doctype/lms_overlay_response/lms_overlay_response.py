@@ -28,3 +28,13 @@ def get_permission_query_conditions(user=None):
 	if user == "Administrator" or has_moderator_role(user) or has_course_instructor_role(user):
 		return ""
 	return f"""(`tabLMS Overlay Response`.`member` = {frappe.db.escape(user)})"""
+
+
+def has_permission(doc, ptype="read", user=None):
+	"""Per-document gate mirroring the list filter above; see the note in
+	lms_placement_attempt.has_permission for why a list filter alone is
+	not enough."""
+	user = user or frappe.session.user
+	if user == "Administrator" or has_moderator_role(user) or has_course_instructor_role(user):
+		return True
+	return doc.member == user

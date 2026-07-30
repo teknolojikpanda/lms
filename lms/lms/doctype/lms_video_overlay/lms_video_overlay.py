@@ -22,6 +22,7 @@ from lms.lms.language_platform.question_utils import (
 	grade_answer,
 	marshal_question,
 )
+from lms.lms.permissions import can_access_lesson
 from lms.lms.utils import has_course_instructor_role, has_moderator_role
 
 
@@ -67,6 +68,23 @@ def get_permission_query_conditions(user=None):
 	return "(`tabLMS Video Overlay`.`published` = 1)"
 
 
+def has_permission(doc, ptype="read", user=None):
+	"""Per-document gate; the query conditions above only filter lists.
+
+	A list filter says nothing about `/api/resource/LMS Video Overlay/<name>`,
+	which is answered by role and document permissions alone. Students hold
+	`read` on this doctype, so without this an overlay could be fetched
+	directly by name regardless of the lesson it belongs to.
+	"""
+	user = user or frappe.session.user
+	if user == "Administrator" or has_moderator_role(user) or has_course_instructor_role(user):
+		return True
+	if not doc.published:
+		return False
+	# Same gate as the lesson itself: overlays are lesson content.
+	return can_access_lesson(doc.lesson, user=user)
+
+
 def _is_staff() -> bool:
 	return has_moderator_role() or has_course_instructor_role()
 
@@ -104,6 +122,15 @@ def get_lesson_overlays(lesson: str, batch: str | None = None) -> list[dict]:
 	"""
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Please login to view lesson overlays."), frappe.PermissionError)
+
+	# Overlays are lesson content, so they inherit the lesson's gate. Being
+	# logged in is not access: without this, anyone who knows (or guesses)
+	# a lesson name could read its questions and notes without enrolling,
+	# buying the course, or the lesson being a preview. The query below
+	# runs with ignore_permissions to apply the scope rules by hand, which
+	# is exactly why the check has to happen here instead.
+	if not can_access_lesson(lesson):
+		frappe.throw(_("You do not have access to this lesson."), frappe.PermissionError)
 
 	overlays = frappe.get_all(
 		"LMS Video Overlay",
