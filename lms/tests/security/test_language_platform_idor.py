@@ -150,6 +150,148 @@ class TestLanguagePlatformIDOR(BaseTestUtils, IntegrationTestCase):
 		frappe.db.commit()
 		self._assert_denied("LMS Speaking Submission", submission.name, "a speaking submission")
 
+	def _lesson(self):
+		"""A course the attacker is enrolled in, so only scope is in play."""
+		h = frappe.generate_hash(length=5)
+		instructor = self._create_user(
+			f"idor-instr-{h}@example.com", "In", "Structor", ["Course Creator", "Moderator"]
+		)
+		self.created.append(("User", instructor.name))
+		course = self._track(
+			self._create_course(title=f"IDOR Course {h}", instructor=instructor.email)
+		)
+		chapter = self._track(self._create_chapter(f"IDOR Ch {h}", course.name))
+		lesson = self._track(self._create_lesson(f"IDOR L {h}", chapter.name, course.name))
+		self._track(
+			frappe.get_doc(
+				{
+					"doctype": "LMS Enrollment",
+					"member": self.attacker.email,
+					"course": course.name,
+				}
+			).insert(ignore_permissions=True)
+		)
+		return course, lesson
+
+	def test_a_student_cannot_read_an_unpublished_overlay(self):
+		"""Drafts are staff-only, whatever the lesson access."""
+		course, lesson = self._lesson()
+		overlay = self._track(
+			frappe.get_doc(
+				{
+					"doctype": "LMS Video Overlay",
+					"lesson": lesson.name,
+					"course": course.name,
+					"timestamp_ms": 1000,
+					"type": "Note",
+					"scope": "Course",
+					"note_text": "an unfinished draft",
+					"published": 0,
+				}
+			).insert(ignore_permissions=True)
+		)
+		frappe.db.commit()
+		self._assert_denied("LMS Video Overlay", overlay.name, "an unpublished overlay")
+
+	def test_a_student_cannot_read_another_cohorts_batch_overlay(self):
+		"""Course access is not batch access.
+
+		`get_lesson_overlays` filters Batch-scoped overlays by enrolment,
+		so the per-document gate has to apply the same rule — otherwise a
+		student in the course reads another cohort's overlay by name.
+		"""
+		course, lesson = self._lesson()
+		other_batch = self._track(
+			frappe.get_doc(
+				{
+					"doctype": "LMS Batch",
+					"title": f"Other cohort {frappe.generate_hash(length=5)}",
+					"start_date": "2026-01-01",
+					"end_date": "2026-06-01",
+					"start_time": "09:00:00",
+					"end_time": "10:00:00",
+					"description": "x",
+					"batch_details": "x",
+					"timezone": "Europe/Istanbul",
+					"published": 0,
+					"instructors": [{"instructor": "Administrator"}],
+				}
+			).insert(ignore_permissions=True)
+		)
+		overlay = self._track(
+			frappe.get_doc(
+				{
+					"doctype": "LMS Video Overlay",
+					"lesson": lesson.name,
+					"course": course.name,
+					"timestamp_ms": 2000,
+					"type": "Note",
+					"scope": "Batch",
+					"batch": other_batch.name,
+					"note_text": "for the other cohort only",
+					"published": 1,
+				}
+			).insert(ignore_permissions=True)
+		)
+		frappe.db.commit()
+		self._assert_denied("LMS Video Overlay", overlay.name, "another cohort's batch overlay")
+
+	def test_a_student_cannot_read_another_students_overlay_response(self):
+		course, lesson = self._lesson()
+		overlay = self._track(
+			frappe.get_doc(
+				{
+					"doctype": "LMS Video Overlay",
+					"lesson": lesson.name,
+					"course": course.name,
+					"timestamp_ms": 3000,
+					"type": "Note",
+					"scope": "Course",
+					"note_text": "published",
+					"published": 1,
+				}
+			).insert(ignore_permissions=True)
+		)
+		response = self._track(
+			frappe.get_doc(
+				{
+					"doctype": "LMS Overlay Response",
+					"overlay": overlay.name,
+					"lesson": lesson.name,
+					"member": self.victim.email,
+					"answer": "the victim's answer",
+				}
+			).insert(ignore_permissions=True)
+		)
+		frappe.db.commit()
+		self._assert_denied("LMS Overlay Response", response.name, "an overlay response")
+
+	def test_a_system_manager_keeps_direct_access(self):
+		"""The gate must not take away what the permission table grants."""
+		h = frappe.generate_hash(length=5)
+		manager = self._create_user(f"sm-{h}@example.com", "Sys", "Manager", ["System Manager"])
+		doc = self._track(
+			frappe.get_doc(
+				{
+					"doctype": "LMS Accessibility Preference",
+					"member": self.victim.email,
+					"font_step": 3,
+					"contrast_mode": "normal",
+				}
+			).insert(ignore_permissions=True)
+		)
+		frappe.db.commit()
+
+		frappe.set_user(manager.email)
+		try:
+			self.assertTrue(
+				frappe.has_permission("LMS Accessibility Preference", doc=doc.name, ptype="read"),
+				"a System Manager lost access the doctype grants it",
+			)
+		finally:
+			frappe.set_user("Administrator")
+			frappe.delete_doc("User", manager.name, force=True, ignore_permissions=True)
+
 	def test_the_owner_can_still_read_their_own_record(self):
 		"""The gate must not lock people out of their own data."""
 		doc = self._track(

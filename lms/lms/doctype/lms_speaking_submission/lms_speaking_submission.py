@@ -93,6 +93,7 @@ def has_permission(doc, ptype="read", user=None):
 	user = user or frappe.session.user
 	if (
 		user == "Administrator"
+		or "System Manager" in frappe.get_roles(user)
 		or has_moderator_role(user)
 		or has_course_instructor_role(user)
 		or has_evaluator_role(user)

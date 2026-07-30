@@ -35,6 +35,11 @@ def has_permission(doc, ptype="read", user=None):
 	lms_placement_attempt.has_permission for why a list filter alone is
 	not enough."""
 	user = user or frappe.session.user
-	if user == "Administrator" or has_moderator_role(user) or has_course_instructor_role(user):
+	if (
+		user == "Administrator"
+		or "System Manager" in frappe.get_roles(user)
+		or has_moderator_role(user)
+		or has_course_instructor_role(user)
+	):
 		return True
 	return doc.member == user

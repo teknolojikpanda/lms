@@ -77,12 +77,25 @@ def has_permission(doc, ptype="read", user=None):
 	directly by name regardless of the lesson it belongs to.
 	"""
 	user = user or frappe.session.user
-	if user == "Administrator" or has_moderator_role(user) or has_course_instructor_role(user):
+	if (
+		user == "Administrator"
+		or "System Manager" in frappe.get_roles(user)
+		or has_moderator_role(user)
+		or has_course_instructor_role(user)
+	):
 		return True
 	if not doc.published:
 		return False
 	# Same gate as the lesson itself: overlays are lesson content.
-	return can_access_lesson(doc.lesson, user=user)
+	if not can_access_lesson(doc.lesson, user=user):
+		return False
+	# And the same scope rule get_lesson_overlays applies. Course access
+	# is not batch access: a Batch-scoped overlay is written for one
+	# cohort, so without this a student enrolled in the course could read
+	# another cohort's note or question by name.
+	if doc.scope == "Batch":
+		return doc.batch in _member_batches(user)
+	return True
 
 
 def _is_staff() -> bool:

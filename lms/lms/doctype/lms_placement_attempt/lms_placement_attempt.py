@@ -69,7 +69,13 @@ def has_permission(doc, ptype="read", user=None):
 	fetch another student's attempt — answers, score and level — by name.
 	"""
 	user = user or frappe.session.user
-	if user == "Administrator" or has_moderator_role(user):
+	# System Manager is exempt because the doctype already grants it read;
+	# denying here would take away access the permission table gives.
+	if (
+		user == "Administrator"
+		or "System Manager" in frappe.get_roles(user)
+		or has_moderator_role(user)
+	):
 		return True
 	return doc.member == user
 
