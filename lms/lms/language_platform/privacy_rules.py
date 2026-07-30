@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 #   purge:       delete the row entirely on erasure (personal free text)
 #   scrub:       field -> replacement value applied on erasure
 PERSONAL_DATA_SOURCES = [
+	# --- academic record: retained, pseudonymised by the User rename -----
 	{"doctype": "LMS Enrollment", "owner_field": "member"},
 	{"doctype": "LMS Course Progress", "owner_field": "member"},
 	{"doctype": "LMS Quiz Submission", "owner_field": "member"},
@@ -30,13 +31,38 @@ PERSONAL_DATA_SOURCES = [
 	{"doctype": "LMS Video Watch Duration", "owner_field": "member"},
 	{"doctype": "LMS Placement Attempt", "owner_field": "member"},
 	{"doctype": "LMS Overlay Response", "owner_field": "member"},
+	{"doctype": "LMS Programming Exercise Submission", "owner_field": "member"},
+	{"doctype": "LMS Certificate Request", "owner_field": "member"},
+	{"doctype": "LMS Badge Assignment", "owner_field": "member"},
+	# Financial records carry their own statutory retention, which outlives
+	# an erasure request. Registered so they are *exported*, and left in
+	# place so the obligation is met.
+	{"doctype": "LMS Payment", "owner_field": "member"},
+	# The audit trail of the person's own requests. Deleting it would erase
+	# the evidence that the erasure was carried out.
+	{"doctype": "LMS Data Request", "owner_field": "subject_user"},
+	# --- scrubbed: the row stays, the sensitive columns do not -----------
 	{
 		"doctype": "LMS Speaking Submission",
 		"owner_field": "member",
 		"scrub": {"transcript": None, "audio_file": None},
 	},
+	# A forensic trace exists to identify a viewer, so after erasure it
+	# must no longer be able to. The mapping row is kept for the leak
+	# record; the network identifiers that describe the person are not.
+	{
+		"doctype": "LMS Watermark Session",
+		"owner_field": "member",
+		"scrub": {"ip_address": None, "user_agent": None},
+	},
+	# --- purged: personal expression with no retention duty --------------
 	{"doctype": "LMS Lesson Note", "owner_field": "member", "purge": True},
 	{"doctype": "LMS Course Review", "owner_field": "owner", "purge": True},
+	{"doctype": "LMS Batch Feedback", "owner_field": "member", "purge": True},
+	{"doctype": "LMS Job Application", "owner_field": "user", "purge": True},
+	# Disability-related settings: no academic value, and the most
+	# sensitive inference in the set.
+	{"doctype": "LMS Accessibility Preference", "owner_field": "member", "purge": True},
 ]
 
 # User fields carrying identity, blanked on erasure.
