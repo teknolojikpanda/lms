@@ -105,6 +105,18 @@ has_permission = {
 	"LMS Certificate": "lms.lms.doctype.lms_certificate.lms_certificate.has_permission",
 	"Course Lesson": "lms.lms.doctype.course_lesson.course_lesson.has_permission",
 	"File": "lms.lms.permissions.file_has_permission",
+	# Every doctype in permission_query_conditions above needs an entry
+	# here too. Query conditions filter list and report queries; a direct
+	# read of /api/resource/<doctype>/<name> is answered by role and
+	# document permissions alone, and students hold `read` on these. The
+	# two lists are meant to stay in step — see
+	# lms.tests.security.test_language_platform_idor, which fails if one
+	# gains a doctype the other lacks.
+	"LMS Placement Attempt": "lms.lms.doctype.lms_placement_attempt.lms_placement_attempt.has_permission",
+	"LMS Video Overlay": "lms.lms.doctype.lms_video_overlay.lms_video_overlay.has_permission",
+	"LMS Overlay Response": "lms.lms.doctype.lms_overlay_response.lms_overlay_response.has_permission",
+	"LMS Speaking Submission": "lms.lms.doctype.lms_speaking_submission.lms_speaking_submission.has_permission",
+	"LMS Accessibility Preference": "lms.lms.doctype.lms_accessibility_preference.lms_accessibility_preference.has_permission",
 }
 
 # DocType Class

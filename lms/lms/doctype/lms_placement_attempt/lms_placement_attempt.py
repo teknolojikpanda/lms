@@ -60,6 +60,26 @@ def get_permission_query_conditions(user=None):
 	return f"""(`tabLMS Placement Attempt`.`member` = {frappe.db.escape(user)})"""
 
 
+def has_permission(doc, ptype="read", user=None):
+	"""Per-document gate mirroring the list filter above.
+
+	Query conditions constrain list and report queries only. A direct read
+	of `/api/resource/LMS Placement Attempt/<name>` is answered by role and
+	document permissions, so without this a student holding `read` could
+	fetch another student's attempt — answers, score and level — by name.
+	"""
+	user = user or frappe.session.user
+	# System Manager is exempt because the doctype already grants it read;
+	# denying here would take away access the permission table gives.
+	if (
+		user == "Administrator"
+		or "System Manager" in frappe.get_roles(user)
+		or has_moderator_role(user)
+	):
+		return True
+	return doc.member == user
+
+
 def _require_login():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Please login to take the placement test."), frappe.PermissionError)

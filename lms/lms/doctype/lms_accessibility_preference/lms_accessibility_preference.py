@@ -20,3 +20,18 @@ def get_permission_query_conditions(user=None):
 	if user == "Administrator" or "System Manager" in frappe.get_roles(user):
 		return ""
 	return f"""(`tabLMS Accessibility Preference`.`member` = {frappe.db.escape(user)})"""
+
+
+def has_permission(doc, ptype="read", user=None):
+	"""Per-document gate mirroring the list filter above.
+
+	The weakest of the set without this, because `autoname: field:member`
+	makes the document name the member's email — so the identifier needed
+	to read someone else's record is not guessed, it is already known.
+	The contents are disability-related settings, which is exactly the
+	kind of inference §6.3 accessibility support should not leak.
+	"""
+	user = user or frappe.session.user
+	if user == "Administrator" or "System Manager" in frappe.get_roles(user):
+		return True
+	return doc.member == user
