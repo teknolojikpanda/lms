@@ -7,24 +7,34 @@ The *policy* (what is personal data, how it is anonymised) lives in
 ``privacy_rules``; this module only executes it against the database.
 
 - **Export**: collect everything stored about a person into one JSON
-  document.
+  document, loaded document by document so child tables — the answers,
+  not just the wrapper around them — are included.
 - **Erasure**: *anonymise* rather than hard-delete. The agreement permits
   erasure "zorunlu saklama halleri haricinde" — academic records must
   survive their Ek-2 retention window, so identifying fields are scrubbed
   and the account disabled while pseudonymous rows remain. Free text the
   student wrote is deleted outright, and speaking audio is destroyed
   immediately rather than waiting for its lifecycle rule.
+
+  What makes the retained rows genuinely pseudonymous is renaming the
+  User: Frappe rewrites declared Link fields and, via
+  ``User.after_rename``, the ``owner`` and ``modified_by`` column of
+  every table. Without it those rows kept the original address and only
+  the summary changed.
 """
 
 from __future__ import annotations
 
 import frappe
 from frappe import _
+from frappe.model.rename_doc import rename_doc
 from frappe.utils import now_datetime
 
 from lms.lms.language_platform.privacy_rules import (
 	PERSONAL_DATA_SOURCES,
+	anonymized_email,
 	build_export_payload,
+	denormalized_scrub_values,
 	user_scrub_values,
 )
 from lms.lms.language_platform.search import remove_document as remove_from_search_index
@@ -51,12 +61,19 @@ def collect_user_data(user: str) -> dict:
 		doctype = source["doctype"]
 		if not frappe.db.exists("DocType", doctype):
 			continue
-		rows = frappe.get_all(
+		names = frappe.get_all(
 			doctype,
 			filters={source["owner_field"]: user},
-			fields=["*"],
+			pluck="name",
 			ignore_permissions=True,
 		)
+		# Loaded document by document rather than with fields=["*"], which
+		# returns parent columns only. The answers themselves live in child
+		# tables — quiz results, the questions and responses of a placement
+		# attempt, speaking rubric feedback — so a column-wise export
+		# returned the shell of each record and none of its content, while
+		# reporting a row count that looked complete.
+		rows = [frappe.get_doc(doctype, name).as_dict() for name in names]
 		if rows:
 			records[doctype] = rows
 
@@ -86,9 +103,10 @@ def anonymize_user(user: str) -> dict:
 		if not frappe.db.exists("DocType", doctype):
 			continue
 
+		owner_field = source["owner_field"]
 		names = frappe.get_all(
 			doctype,
-			filters={source["owner_field"]: user},
+			filters={owner_field: user},
 			pluck="name",
 			ignore_permissions=True,
 		)
@@ -108,7 +126,12 @@ def anonymize_user(user: str) -> dict:
 			summary[f"{doctype} (deleted)"] = len(names)
 			continue
 
-		if scrub := source.get("scrub"):
+		# Copies of the person's own profile, duplicated onto the row by
+		# fetch_from. The rename below fixes the link; nothing fixes these.
+		scrub = dict(source.get("scrub") or {})
+		scrub.update(denormalized_scrub_values(user, _fetched_user_fields(doctype, owner_field)))
+
+		if scrub:
 			for name in names:
 				frappe.db.set_value(doctype, name, scrub, update_modified=False)
 				if searchable:
@@ -118,10 +141,51 @@ def anonymize_user(user: str) -> dict:
 			summary[f"{doctype} (retained, pseudonymous)"] = len(names)
 
 	_purge_speaking_audio(user, summary)
-	_scrub_user_record(user, summary)
+	# Last, because everything above finds its rows by the old user id and
+	# the rename changes it everywhere at once.
+	new_user = _scrub_user_record(user, summary)
+	summary["Pseudonym"] = new_user
 
 	frappe.db.commit()
 	return summary
+
+
+def _fetched_user_fields(doctype: str, owner_field: str) -> dict:
+	"""Fields on ``doctype`` that copy a value from the owner's User row.
+
+	Read from the doctype metadata rather than listed, so a denormalised
+	field added later is covered without anyone remembering to come here.
+	"""
+	fetched = {}
+	for field in frappe.get_meta(doctype).fields:
+		if not field.fetch_from:
+			continue
+		link_field, _, source_field = field.fetch_from.partition(".")
+		if link_field == owner_field and source_field:
+			fetched[field.fieldname] = source_field
+	return fetched
+
+
+def _unique_pseudonym(user: str) -> str:
+	"""A pseudonymous address not already taken.
+
+	`anonymized_email` is deterministic so a subject erased in batches
+	resolves to one pseudonym. But an address can be registered again
+	after an erasure, and erasing the new account would collide with the
+	old pseudonym — the rename then fails, or is skipped and the account
+	stays under its real address while the summary claims otherwise.
+	Later erasures of the same address get a suffix rather than silently
+	doing nothing.
+	"""
+	base = anonymized_email(user)
+	if not frappe.db.exists("User", base):
+		return base
+	local, _, domain = base.partition("@")
+	for suffix in range(2, 1000):
+		candidate = f"{local}-{suffix}@{domain}"
+		if not frappe.db.exists("User", candidate):
+			return candidate
+	raise frappe.ValidationError(_("Could not allocate a free pseudonym for this subject."))
 
 
 def _purge_speaking_audio(user: str, summary: dict):
@@ -146,18 +210,49 @@ def _purge_speaking_audio(user: str, summary: dict):
 		summary["Speaking audio files (destroyed)"] = deleted
 
 
-def _scrub_user_record(user: str, summary: dict):
-	"""Blank identity fields, replace the email and disable login.
+def _scrub_user_record(user: str, summary: dict) -> str:
+	"""Blank identity fields, replace the email, disable login, and rename.
 
-	**Known residual (flagged for legal review):** the User primary key is
-	the original email address, and Frappe stores it in the ``owner`` /
-	``modified_by`` column of every row the person ever created. Renaming
-	the User updates declared Link fields but *not* those two columns, so
-	complete identifier removal needs a separate, tested migration that
-	rewrites them across all doctypes. Until then this is pseudonymisation
-	with login disabled — enough to stop processing — and the position must
-	be confirmed by counsel, per the agreement's note that final KVKK
-	interpretation requires legal advice.
+	The rename is what makes the retained records pseudonymous. Without
+	it, every row kept for its academic value still carried the original
+	address in its ``member`` link, and the summary called them
+	"pseudonymous" while nothing about them had changed.
+
+	Frappe's ``User.after_rename`` walks every table in the database and
+	rewrites ``owner`` and ``modified_by`` wherever they hold the old
+	name, and the rename itself updates declared Link fields. Between
+	them the identifier is removed from the database, not merely from the
+	User record — which is stronger than the position previously
+	documented here, and was verified against this Frappe version rather
+	than assumed.
+
+	Returns the new user id so callers can report it.
 	"""
-	frappe.db.set_value("User", user, user_scrub_values(user), update_modified=False)
-	summary["User record (anonymized, login disabled)"] = 1
+	new_user = _unique_pseudonym(user)
+	values = user_scrub_values(user)
+	# Every identity value is derived from the pseudonym actually chosen,
+	# not from the deterministic handle. `email` and `username` are both
+	# unique columns, so a repeat erasure of a re-registered address would
+	# otherwise collide on whichever the scrub wrote first — and it is the
+	# username that trips, several statements after the email looked fine.
+	handle = new_user.partition("@")[0]
+	values.update({"email": new_user, "username": handle, "first_name": handle, "full_name": handle})
+	frappe.db.set_value("User", user, values, update_modified=False)
+
+	if new_user != user:
+		# ignore_permissions because erasure runs under the approval of the
+		# request document, not the caller's own rights over the subject.
+		rename_doc(
+			"User",
+			user,
+			new_user,
+			force=True,
+			ignore_permissions=True,
+			show_alert=False,
+		)
+		summary["User record (anonymized, renamed, login disabled)"] = 1
+	else:
+		summary["User record (anonymized, login disabled)"] = 1
+		new_user = user
+
+	return new_user
