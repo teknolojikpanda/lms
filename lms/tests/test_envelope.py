@@ -137,6 +137,72 @@ class TestEnvelopeErrors(IntegrationTestCase):
 		with self.assertRaises(frappe.exceptions.AuthenticationError):
 			unauthenticated()
 
+	def test_a_handled_throw_keeps_what_it_deliberately_persisted(self):
+		"""Persist-then-throw is a real pattern here, not an accident.
+
+		`save_placement_answer` finalises an expired attempt and then
+		throws "Time is up"; `start_placement` finalises a timed-out
+		attempt before it can throw on exhausted attempts. Rolling a
+		handled throw back undoes that finalisation — and in the second
+		case on every retry, so the attempt never leaves "In Progress".
+		"""
+		title = f"envelope-keep-{frappe.generate_hash(length=6)}"
+		self.addCleanup(
+			lambda: frappe.db.exists("LMS Speaking Prompt", {"title": title})
+			and frappe.delete_doc(
+				"LMS Speaking Prompt",
+				frappe.db.get_value("LMS Speaking Prompt", {"title": title}),
+				force=True,
+				ignore_permissions=True,
+			)
+		)
+
+		@envelope
+		def finalize_then_throw():
+			frappe.get_doc(
+				{
+					"doctype": "LMS Speaking Prompt",
+					"title": title,
+					"scenario": "persisted on purpose before throwing",
+					"enabled": 1,
+				}
+			).insert(ignore_permissions=True)
+			frappe.throw("Time is up. The attempt was submitted automatically.")
+
+		result = finalize_then_throw()
+		self.assertEqual(result["error"]["code"], "VALIDATION_ERROR")
+		self.assertTrue(
+			frappe.db.exists("LMS Speaking Prompt", {"title": title}),
+			"a deliberate write before a handled throw was rolled back",
+		)
+
+	def test_a_handled_permission_error_also_keeps_its_writes(self):
+		title = f"envelope-perm-{frappe.generate_hash(length=6)}"
+		self.addCleanup(
+			lambda: frappe.db.exists("LMS Speaking Prompt", {"title": title})
+			and frappe.delete_doc(
+				"LMS Speaking Prompt",
+				frappe.db.get_value("LMS Speaking Prompt", {"title": title}),
+				force=True,
+				ignore_permissions=True,
+			)
+		)
+
+		@envelope
+		def audit_then_refuse():
+			frappe.get_doc(
+				{
+					"doctype": "LMS Speaking Prompt",
+					"title": title,
+					"scenario": "an audit trail written before refusing",
+					"enabled": 1,
+				}
+			).insert(ignore_permissions=True)
+			frappe.throw("not allowed", frappe.PermissionError)
+
+		audit_then_refuse()
+		self.assertTrue(frappe.db.exists("LMS Speaking Prompt", {"title": title}))
+
 	def test_partial_work_is_rolled_back(self):
 		"""Swallowing the error must not let half a write commit.
 

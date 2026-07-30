@@ -87,6 +87,25 @@ docker exec -w /home/frappe/frappe-bench lms-staging-frappe-1 \
 
 ## Notes that cost time to discover
 
+- **Line endings.** On Windows with `core.autocrlf=true`, a checkout
+  rewrites `docker/init-staging.sh` to CRLF and bash reads the trailing
+  `\r` as part of each command:
+
+  ```
+  init-staging.sh: line 8: $'\r': command not found
+  init-staging.sh: line 98: syntax error: unexpected end of file
+  ```
+
+  `.gitattributes` pins `*.sh` to LF, which fixes fresh clones. It cannot
+  fix an existing one — adding it does not change the script's blob, so
+  git leaves the already-CRLF working copy alone. The compose file
+  therefore strips carriage returns before running the script, so the
+  bench starts either way. To clean up an existing checkout:
+
+  ```bash
+  git add --renormalize . && git checkout -- docker/
+  ```
+
 - **MariaDB healthcheck** must pass credentials. `healthcheck.sh
   --connect` authenticates as root with no password, and `--su-mysql` as
   a unix user with no socket grant; both fail when

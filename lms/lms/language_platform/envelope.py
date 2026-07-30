@@ -51,6 +51,9 @@ def _discard_partial_work():
 	any state-changing method. Without this, a call that failed halfway
 	would have its first half committed — the opposite of what the
 	framework does when the exception is allowed to propagate.
+
+	Used **only** for unforeseen exceptions. See the handled branches for
+	why they must not roll back.
 	"""
 	try:
 		frappe.db.rollback()
@@ -67,8 +70,17 @@ def envelope(fn):
 		try:
 			data = fn(*args, **kwargs)
 			return {"ok": True, "data": data, "meta": {"correlationId": correlation_id}}
+		# A thrown validation or permission error is a *handled* outcome,
+		# and this codebase deliberately writes before throwing one:
+		# `save_placement_answer` finalises an expired attempt and then
+		# throws "Time is up", and `start_placement` finalises a timed-out
+		# attempt before it can throw on exhausted attempts. Rolling those
+		# back undoes the finalisation, and in the second case does so on
+		# every retry — the attempt never leaves "In Progress" again.
+		#
+		# So no rollback here. Only the unforeseen branch discards work,
+		# where nothing has promised to have persisted anything.
 		except frappe.exceptions.ValidationError as e:
-			_discard_partial_work()
 			frappe.clear_messages()
 			frappe.local.response["http_status_code"] = 417
 			return {
@@ -77,7 +89,6 @@ def envelope(fn):
 				"meta": {"correlationId": correlation_id},
 			}
 		except frappe.PermissionError as e:
-			_discard_partial_work()
 			frappe.clear_messages()
 			frappe.local.response["http_status_code"] = 403
 			return {
