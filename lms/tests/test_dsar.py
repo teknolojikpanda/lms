@@ -324,7 +324,9 @@ class TestDataSubjectRights(IntegrationTestCase):
 			self.assertEqual(
 				row[field], expected, f"{field} was not scrubbed as the rules require"
 			)
-		self.assertFalse(row.client_secret, "the subject's credentials survived erasure")
+		self.assertNotIn(
+			"secret-123", frappe.as_json(row), "the subject's credentials survived erasure"
+		)
 
 	def test_conferencing_settings_hold_nothing_personal_beyond_the_scrub(self):
 		"""Every field on these doctypes is scrubbed, fetched, or a link.

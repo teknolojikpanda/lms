@@ -20,6 +20,11 @@ from datetime import datetime, timedelta
 #   owner_field: column linking the row to the person
 #   purge:       delete the row entirely on erasure (personal free text)
 #   scrub:       field -> replacement value applied on erasure
+# Stands in for a mandatory field whose real value was personal. Emptying
+# such a field would leave a row that fails validation the next time it is
+# saved, so it carries a marker instead of nothing.
+ERASED_MARKER = "erased"
+
 PERSONAL_DATA_SOURCES = [
 	# --- academic record: retained, pseudonymised by the User rename -----
 	{"doctype": "LMS Enrollment", "owner_field": "member"},
@@ -77,14 +82,18 @@ PERSONAL_DATA_SOURCES = [
 		"owner_field": "member",
 		"scrub": {"account_name": None, "google_calendar": None, "enabled": 0},
 	},
+	# account_id, client_id and client_secret are mandatory on this
+	# doctype, so they are replaced with a marker rather than emptied:
+	# db.set_value bypasses validation, but a NULL would leave a row that
+	# fails the next time anything saves it.
 	{
 		"doctype": "LMS Zoom Settings",
 		"owner_field": "member",
 		"scrub": {
-			"account_name": None,
-			"account_id": None,
-			"client_id": None,
-			"client_secret": None,
+			"account_name": ERASED_MARKER,
+			"account_id": ERASED_MARKER,
+			"client_id": ERASED_MARKER,
+			"client_secret": ERASED_MARKER,
 			"enabled": 0,
 		},
 	},
