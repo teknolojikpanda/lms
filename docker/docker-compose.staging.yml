@@ -50,7 +50,16 @@ services:
 
   frappe:
     image: frappe/bench:latest
-    command: bash /workspace/lms-src/docker/init-staging.sh
+    # Strip carriage returns before running, rather than trusting the
+    # checkout to have LF endings. .gitattributes fixes fresh clones, but
+    # it cannot fix an existing one: adding it does not change the script's
+    # blob, so git leaves the already-CRLF working copy alone and the bench
+    # keeps failing with `$'\r': command not found` until someone
+    # renormalises by hand. This makes the container immune either way.
+    command:
+      - bash
+      - -c
+      - tr -d '\r' < /workspace/lms-src/docker/init-staging.sh > /tmp/init-staging.sh && bash /tmp/init-staging.sh
     environment:
       - SHELL=/bin/bash
       # Branch to install from the mounted repo. Left unset on purpose:

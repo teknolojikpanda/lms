@@ -127,6 +127,12 @@ def start_placement(blueprint: str) -> dict:
 		if not attempt.is_expired():
 			return _marshal_attempt(attempt)
 		_finalize(attempt)  # timed out: grade what was autosaved
+		# Committed before anything below can throw. The attempts check
+		# further down raises once the limit is reached, and the envelope
+		# would roll this back with it — leaving the timed-out attempt In
+		# Progress and re-finalised, then rolled back again, on every
+		# retry. Committing here is what stops that becoming permanent.
+		frappe.db.commit()
 
 	previous = frappe.get_all(
 		"LMS Placement Attempt",
@@ -198,6 +204,12 @@ def save_placement_answer(attempt: str, question: str, answer: str) -> dict:
 		frappe.throw(_("This attempt has already been submitted."))
 	if doc.is_expired():
 		_finalize(doc)
+		# Committed before throwing, on purpose. The envelope rolls back a
+		# failed call by default, and this one has genuinely completed the
+		# attempt — the throw only tells the student why their answer was
+		# not accepted. Losing the finalisation would leave the attempt In
+		# Progress with its time already spent.
+		frappe.db.commit()
 		frappe.throw(_("Time is up. The attempt was submitted automatically."))
 
 	row = next((r for r in doc.questions if r.question == question), None)

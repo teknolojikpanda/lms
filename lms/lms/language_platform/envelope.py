@@ -51,6 +51,9 @@ def _discard_partial_work():
 	any state-changing method. Without this, a call that failed halfway
 	would have its first half committed — the opposite of what the
 	framework does when the exception is allowed to propagate.
+
+	Used **only** for unforeseen exceptions. See the handled branches for
+	why they must not roll back.
 	"""
 	try:
 		frappe.db.rollback()
@@ -67,6 +70,18 @@ def envelope(fn):
 		try:
 			data = fn(*args, **kwargs)
 			return {"ok": True, "data": data, "meta": {"correlationId": correlation_id}}
+		# Rollback is the default on every failure path, including handled
+		# ones. Returning a value puts the request on frappe's success
+		# path, which commits — so without this a call that wrote and then
+		# threw would keep the write. `record_restore_test` is the shape
+		# that matters: it saves the DR clock and then adds the audit
+		# comment, and committing the clock without its audit record is
+		# worse than failing outright.
+		#
+		# A caller that genuinely means to persist before throwing commits
+		# first and says so — see the timeout finalisation in
+		# lms_placement_attempt. Committed work is not ours to undo, which
+		# is what makes that an opt-in rather than an exception here.
 		except frappe.exceptions.ValidationError as e:
 			_discard_partial_work()
 			frappe.clear_messages()

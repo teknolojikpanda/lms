@@ -137,6 +137,97 @@ class TestEnvelopeErrors(IntegrationTestCase):
 		with self.assertRaises(frappe.exceptions.AuthenticationError):
 			unauthenticated()
 
+	def _prompt_cleanup(self, title):
+		def remove():
+			name = frappe.db.get_value("LMS Speaking Prompt", {"title": title})
+			if name:
+				frappe.delete_doc("LMS Speaking Prompt", name, force=True, ignore_permissions=True)
+				frappe.db.commit()
+
+		self.addCleanup(remove)
+
+	def _write(self, title, scenario):
+		frappe.get_doc(
+			{
+				"doctype": "LMS Speaking Prompt",
+				"title": title,
+				"scenario": scenario,
+				"enabled": 1,
+			}
+		).insert(ignore_permissions=True)
+
+	def test_an_uncommitted_write_is_rolled_back_on_a_handled_throw(self):
+		"""Rollback is the default, including for handled failures.
+
+		`record_restore_test` is the shape that matters: it saves the DR
+		clock and then adds the audit comment. If that comment is rejected,
+		committing the clock without its audit record is worse than failing
+		outright — so a validation error discards the write unless the
+		caller committed it deliberately.
+		"""
+		title = f"envelope-rollback-{frappe.generate_hash(length=6)}"
+		self._prompt_cleanup(title)
+
+		@envelope
+		def write_then_throw():
+			self._write(title, "not committed, so must not survive")
+			frappe.throw("the audit record was rejected")
+
+		result = write_then_throw()
+
+		self.assertFalse(result["ok"])
+		self.assertEqual(result["error"]["code"], "VALIDATION_ERROR")
+		self.assertEqual(self._status(), 417)
+		self.assertFalse(
+			frappe.db.exists("LMS Speaking Prompt", {"title": title}),
+			"an uncommitted write survived a handled throw",
+		)
+
+	def test_a_committed_write_survives_a_handled_throw(self):
+		"""Persist-then-throw, opted into by committing first.
+
+		How the placement timeout works: `save_placement_answer` finalises
+		an expired attempt, commits, then throws "Time is up", and
+		`start_placement` does the same before it can throw on exhausted
+		attempts. Committed work is not the envelope's to undo — without
+		that, the second case re-finalises and rolls back on every retry
+		and the attempt never leaves "In Progress".
+		"""
+		title = f"envelope-commit-{frappe.generate_hash(length=6)}"
+		self._prompt_cleanup(title)
+
+		@envelope
+		def finalize_commit_then_throw():
+			self._write(title, "committed on purpose before throwing")
+			frappe.db.commit()
+			frappe.throw("Time is up. The attempt was submitted automatically.")
+
+		result = finalize_commit_then_throw()
+
+		self.assertFalse(result["ok"])
+		self.assertEqual(result["error"]["code"], "VALIDATION_ERROR")
+		self.assertEqual(self._status(), 417)
+		self.assertTrue(
+			frappe.db.exists("LMS Speaking Prompt", {"title": title}),
+			"a deliberately committed finalisation was undone",
+		)
+
+	def test_a_permission_error_also_rolls_back_uncommitted_work(self):
+		title = f"envelope-perm-{frappe.generate_hash(length=6)}"
+		self._prompt_cleanup(title)
+
+		@envelope
+		def write_then_refuse():
+			self._write(title, "written before refusing")
+			frappe.throw("not allowed", frappe.PermissionError)
+
+		result = write_then_refuse()
+
+		self.assertFalse(result["ok"])
+		self.assertEqual(result["error"]["code"], "AUTH_FORBIDDEN")
+		self.assertEqual(self._status(), 403)
+		self.assertFalse(frappe.db.exists("LMS Speaking Prompt", {"title": title}))
+
 	def test_partial_work_is_rolled_back(self):
 		"""Swallowing the error must not let half a write commit.
 
