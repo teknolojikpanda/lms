@@ -178,14 +178,28 @@ def _unique_pseudonym(user: str) -> str:
 	doing nothing.
 	"""
 	base = anonymized_email(user)
-	if not frappe.db.exists("User", base):
+	if _pseudonym_is_free(base):
 		return base
 	local, _, domain = base.partition("@")
 	for suffix in range(2, 1000):
 		candidate = f"{local}-{suffix}@{domain}"
-		if not frappe.db.exists("User", candidate):
+		if _pseudonym_is_free(candidate):
 			return candidate
 	raise frappe.ValidationError(_("Could not allocate a free pseudonym for this subject."))
+
+
+def _pseudonym_is_free(candidate: str) -> bool:
+	"""Both unique columns must be free, not just the primary key.
+
+	The scrub writes the handle to `username`, which carries its own
+	unique index. Checking only the User name would accept a candidate
+	whose username another account already holds, and the erasure would
+	then fail on the insert — after the scrub had begun.
+	"""
+	if frappe.db.exists("User", candidate):
+		return False
+	handle = candidate.partition("@")[0]
+	return not frappe.db.exists("User", {"username": handle})
 
 
 def _purge_speaking_audio(user: str, summary: dict):

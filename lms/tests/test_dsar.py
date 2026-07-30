@@ -247,6 +247,80 @@ class TestDataSubjectRights(IntegrationTestCase):
 			frappe.db.exists("User", self.subject), "the re-registered account kept its address"
 		)
 
+	def test_a_username_held_by_someone_else_does_not_block_erasure(self):
+		"""`username` is unique too, and the scrub writes to it.
+
+		Checking only the User primary key accepts a candidate whose
+		username another account holds, and the erasure then fails partway
+		through rather than before it starts.
+		"""
+		from lms.lms.language_platform.privacy_rules import anonymized_handle
+
+		squatter = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": f"squatter-{self.hash}@example.com",
+				"first_name": "Squatter",
+				"username": anonymized_handle(self.subject),
+				"send_welcome_email": 0,
+			}
+		).insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(
+			lambda: frappe.db.exists("User", squatter.name)
+			and frappe.delete_doc("User", squatter.name, force=True, ignore_permissions=True)
+		)
+
+		summary = anonymize_user(self.subject)
+		frappe.db.commit()
+		new_user = summary["Pseudonym"]
+		self.addCleanup(
+			lambda: frappe.db.exists("User", new_user)
+			and frappe.delete_doc("User", new_user, force=True, ignore_permissions=True)
+		)
+
+		self.assertNotEqual(new_user, self.pseudonym, "collided with the taken username")
+		self.assertFalse(frappe.db.exists("User", self.subject))
+
+	def test_conferencing_settings_survive_being_referenced(self):
+		"""Purging a row a batch links to fails the whole request.
+
+		LMS Batch and LMS Live Class hold Link fields to these settings,
+		so they are scrubbed rather than deleted.
+		"""
+		settings = frappe.get_doc(
+			{
+				"doctype": "LMS Zoom Settings",
+				"member": self.subject,
+				"account_name": "the subject's zoom account",
+				"account_id": "acct-123",
+				"client_id": "client-123",
+				"client_secret": "secret-123",
+				"enabled": 1,
+			}
+		).insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(
+			lambda: frappe.db.exists("LMS Zoom Settings", settings.name)
+			and frappe.delete_doc(
+				"LMS Zoom Settings", settings.name, force=True, ignore_permissions=True
+			)
+		)
+
+		anonymize_user(self.subject)
+		frappe.db.commit()
+
+		row = frappe.db.get_value(
+			"LMS Zoom Settings",
+			settings.name,
+			["account_name", "client_secret", "enabled"],
+			as_dict=True,
+		)
+		self.assertIsNotNone(row, "the settings row was deleted despite being referenceable")
+		self.assertFalse(row.account_name)
+		self.assertFalse(row.client_secret, "the subject's credentials survived erasure")
+		self.assertFalse(row.enabled)
+
 	def test_every_lms_doctype_linking_to_a_user_is_classified(self):
 		"""Registered, or explicitly excluded — never merely forgotten.
 

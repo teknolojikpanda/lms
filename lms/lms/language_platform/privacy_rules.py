@@ -67,9 +67,27 @@ PERSONAL_DATA_SOURCES = [
 	{"doctype": "LMS Live Class Participant", "owner_field": "member"},
 	{"doctype": "LMS Program Member", "owner_field": "member"},
 	{"doctype": "LMS Course Interest", "owner_field": "user", "purge": True},
-	# Personal conferencing credentials, not academic record.
-	{"doctype": "LMS Google Meet Settings", "owner_field": "member", "purge": True},
-	{"doctype": "LMS Zoom Settings", "owner_field": "member", "purge": True},
+	# Personal conferencing credentials. Scrubbed rather than purged
+	# because LMS Batch and LMS Live Class hold Link fields to these rows:
+	# deleting one raises a link-exists error and fails the whole erasure
+	# request. Emptying the credentials removes the personal content and
+	# leaves the batch's reference intact.
+	{
+		"doctype": "LMS Google Meet Settings",
+		"owner_field": "member",
+		"scrub": {"account_name": None, "google_calendar": None, "enabled": 0},
+	},
+	{
+		"doctype": "LMS Zoom Settings",
+		"owner_field": "member",
+		"scrub": {
+			"account_name": None,
+			"account_id": None,
+			"client_id": None,
+			"client_secret": None,
+			"enabled": 0,
+		},
+	},
 ]
 
 # Doctypes that link to User but not to a *data subject*: they record who
