@@ -68,10 +68,12 @@ class ProvisioningError(RuntimeError):
 # command failed — but the value after these must never reach terminal
 # scrollback or a CI log, where it outlives the run and the person.
 #
-# Keep in step with the parser: `--admin-password` and
-# `--db-root-password` are ours, `--mariadb-root-password` and
-# `--root-password` are what bench expects. A test asserts every
-# password argument the parser defines is listed here.
+# Listed rather than derived from the parser, deliberately. Only two of
+# these are parser options: `--mariadb-root-password` and
+# `--root-password` are bench's, passed outward and never parsed here, so
+# a parser-derived set would omit exactly the two carrying the database
+# root password. The drift test covers the half that can be checked —
+# every password argument the parser defines must appear here.
 SECRET_FLAGS = frozenset(
 	{
 		"--admin-password",
@@ -93,16 +95,20 @@ def redact_command(command: list[str]) -> str:
 	"""
 	shown: list[str] = []
 	mask_next = False
-	for token in command:
+	for raw in command:
+		# Normalised once, up front: comparing the raw value in one branch
+		# and the string form in another would let a non-string token slip
+		# past the check that arms masking for the value after it.
+		token = str(raw)
 		if mask_next:
 			shown.append(REDACTED)
 			mask_next = False
 			continue
-		flag, sep, _value = str(token).partition("=")
+		flag, sep, _value = token.partition("=")
 		if sep and flag in SECRET_FLAGS:
 			shown.append(f"{flag}={REDACTED}")
 			continue
-		shown.append(str(token))
+		shown.append(token)
 		if token in SECRET_FLAGS:
 			mask_next = True
 	return " ".join(shown)
@@ -165,6 +171,10 @@ def provision(args) -> int:
 
 	# Generated here rather than taken as an argument so it never lands in
 	# shell history or a CI log echo.
+	# Whether this run invented the password decides whether it may be
+	# printed. One the caller supplied is already in their possession, so
+	# echoing it only copies it somewhere less safe.
+	password_was_generated = not args.admin_password
 	admin_password = args.admin_password or secrets.token_urlsafe(18)
 
 	if args.control_site:
@@ -222,16 +232,14 @@ def provision(args) -> int:
 		)
 
 	print(f"\nOK: tenant '{subdomain}' provisioned at https://{site}")
-	if not args.dry_run:
-		# Printed once and deliberately: a generated password has to reach
-		# the operator somehow, and it is not recoverable afterwards.
+	if not args.dry_run and password_was_generated:
+		# Printed once and deliberately: a password this run invented has
+		# to reach the operator somehow, and is not recoverable afterwards.
 		#
 		# "Terminal only" is not something this can promise, though. Piped
 		# or run by a job, stdout is a file that outlives the run, so say
 		# so plainly rather than implying a privacy the output does not
-		# have. A caller that provisions non-interactively should pass
-		# --admin-password from its own secret store instead of having one
-		# generated and then scraping it back out of a log.
+		# have.
 		if not sys.stdout.isatty():
 			print(
 				"\n  WARNING: output is not a terminal, so the password below is being "
@@ -240,6 +248,11 @@ def provision(args) -> int:
 			)
 		print(f"\n  Administrator password: {admin_password}")
 		print("  Store this in the team password manager - it is not saved anywhere.\n")
+	elif not args.dry_run:
+		# The advice above is only advice if taking it actually helps. A
+		# caller-supplied password printed here would land in the same log
+		# the caller moved it to a secret store to avoid.
+		print("\n  Administrator password: as supplied by the caller; not echoed.\n")
 		if args.admin_email:
 			print(f"  An invite was sent to {args.admin_email} for the institution admin.\n")
 	return 0

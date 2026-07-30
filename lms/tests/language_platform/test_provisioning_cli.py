@@ -129,6 +129,36 @@ class TestSecretRedaction(unittest.TestCase):
 		self.assertNotIn(self.ROOT, captured["message"])
 		self.assertIn("Command failed (1)", captured["message"])
 
+	def test_a_non_string_token_still_arms_masking(self):
+		"""A flag compared in its raw form would not arm the mask.
+
+		argparse hands back strings, but callers build these lists by
+		hand; one non-string token before a secret would print it in full.
+		"""
+
+		class _Flag:
+			def __str__(self):
+				return "--admin-password"
+
+		shown = cli.redact_command(["bench", _Flag(), self.ADMIN])
+		self.assertNotIn(self.ADMIN, shown)
+
+	def test_bench_side_flags_are_covered_though_the_parser_never_sees_them(self):
+		"""Why SECRET_FLAGS is a list and not derived from the parser.
+
+		`--mariadb-root-password` and `--root-password` are bench's flags,
+		passed outward and never parsed here. A parser-derived set would
+		omit exactly the two carrying the database root password.
+		"""
+		parser_flags = {
+			option
+			for action in cli.build_parser()._actions
+			for option in action.option_strings
+		}
+		for flag in ("--mariadb-root-password", "--root-password"):
+			self.assertNotIn(flag, parser_flags, f"{flag} is now a parser option; revisit this")
+			self.assertIn(flag, cli.SECRET_FLAGS, f"{flag} would be echoed in full")
+
 	def test_every_password_argument_is_declared_secret(self):
 		"""The drift guard: a new password flag must be added to SECRET_FLAGS.
 
@@ -146,6 +176,54 @@ class TestSecretRedaction(unittest.TestCase):
 		self.assertEqual(
 			missing, [], f"these password flags would be echoed in full: {missing}"
 		)
+
+
+class TestGeneratedPasswordDisclosure(unittest.TestCase):
+	"""A caller-supplied password must never be echoed.
+
+	The advice to pass `--admin-password` from a secret store is only
+	advice if taking it helps: printing it here would land it in the same
+	log the caller moved it to a secret store to avoid.
+	"""
+
+	SUPPLIED = "from-the-secret-store"
+
+	def _run_provision(self, admin_password=None):
+		"""Drive `provision` with real parser defaults, stubbing the shell.
+
+		Built from `build_parser` rather than a hand-made Namespace so a
+		new option cannot make this test fail for want of an attribute.
+		"""
+		import contextlib
+		import io as _io
+
+		argv = ["--subdomain", "ankara-koleji", "--base-domain", "dilplatformu.com"]
+		if admin_password:
+			argv += ["--admin-password", admin_password]
+		args = cli.build_parser().parse_args(argv)
+
+		real_run, real_exists = cli.run, cli.site_exists
+		cli.run = lambda command, **k: ""
+		cli.site_exists = lambda site: False
+		buffer = _io.StringIO()
+		try:
+			with contextlib.redirect_stdout(buffer):
+				cli.provision(args)
+		finally:
+			cli.run, cli.site_exists = real_run, real_exists
+		return buffer.getvalue()
+
+	def test_a_supplied_password_is_not_printed(self):
+		output = self._run_provision(admin_password=self.SUPPLIED)
+		self.assertNotIn(self.SUPPLIED, output, "the caller's own secret was echoed back")
+		self.assertIn("not echoed", output)
+
+	def test_a_generated_password_is_printed(self):
+		"""It has to reach the operator; it is not recoverable afterwards."""
+		output = self._run_provision()
+		self.assertIn("Administrator password:", output)
+		self.assertIn("password manager", output)
+		self.assertNotIn("not echoed", output)
 
 
 class TestReportedArtifacts(unittest.TestCase):
