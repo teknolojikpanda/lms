@@ -113,6 +113,130 @@ class TestSelectQuestions(unittest.TestCase):
 		with self.assertRaises(BlueprintError):
 			select_questions(SEGMENTS, pool, seed="x")
 
+	def test_overlapping_segments_do_not_fail_on_unlucky_seeds(self):
+		"""A satisfiable pool must never intermittently refuse to start.
+
+		A broad Grammar segment and a Grammar/A1 segment draw on the same
+		questions. Filling them in configured order let the broad one
+		consume the only A1 question on about half the seeds, so the same
+		blueprint and the same pool refused some students and not others
+		— and refused the same student on one attempt number but not the
+		next.
+		"""
+		segments = [
+			Segment(count=1, skill="Grammar"),
+			Segment(count=1, skill="Grammar", level="A1"),
+		]
+		pool = [
+			{"name": "G-A1", "language_skill": "Grammar", "language_level": "A1", "topic": "t"},
+			{"name": "G-A2", "language_skill": "Grammar", "language_level": "A2", "topic": "t"},
+		]
+
+		for i in range(200):
+			with self.subTest(seed=i):
+				selected = select_questions(segments, pool, seed=f"overlap-{i}")
+				# Only one assignment works: the constrained segment must
+				# get A1, so the broad one has to take A2.
+				self.assertEqual(selected, ["G-A2", "G-A1"])
+
+	def test_a_chain_of_reassignments_is_followed(self):
+		"""Picking the most constrained segment first is not enough.
+
+		Here every segment has a free choice in isolation and only one
+		assignment satisfies all three, reachable only by moving an
+		already-placed segment onto a different question and moving the
+		one it displaces in turn.
+		"""
+		segments = [
+			Segment(count=1, skill="Grammar"),
+			Segment(count=1, level="A1"),
+			Segment(count=1, skill="Grammar", level="A2"),
+		]
+		pool = [
+			{"name": "GR-A1", "language_skill": "Grammar", "language_level": "A1", "topic": "t"},
+			{"name": "GR-A2", "language_skill": "Grammar", "language_level": "A2", "topic": "t"},
+			{"name": "VO-A1", "language_skill": "Vocabulary", "language_level": "A1", "topic": "t"},
+		]
+
+		for i in range(200):
+			with self.subTest(seed=i):
+				self.assertEqual(
+					select_questions(segments, pool, seed=f"chain-{i}"),
+					["GR-A1", "VO-A1", "GR-A2"],
+				)
+
+	def test_an_impossible_blueprint_is_still_refused(self):
+		"""Matching must not paper over a pool that genuinely cannot work."""
+		segments = [
+			Segment(count=1, skill="Grammar", level="A1"),
+			Segment(count=1, skill="Grammar", level="A1"),
+		]
+		pool = [
+			{"name": "GR-A1", "language_skill": "Grammar", "language_level": "A1", "topic": "t"},
+			{"name": "GR-A2", "language_skill": "Grammar", "language_level": "A2", "topic": "t"},
+		]
+
+		with self.assertRaises(BlueprintError):
+			select_questions(segments, pool, seed="x")
+
+	def test_a_refusal_names_the_segment_that_could_not_be_filled(self):
+		"""An administrator has to be told which row to fix.
+
+		Each segment here has enough matches on its own; they are only
+		short between them, which is exactly the case a per-segment count
+		cannot explain.
+		"""
+		segments = [
+			Segment(count=2, skill="Grammar"),
+			Segment(count=1, skill="Grammar", level="A1"),
+		]
+		pool = [
+			{"name": "GR-A1", "language_skill": "Grammar", "language_level": "A1", "topic": "t"},
+			{"name": "GR-A2", "language_skill": "Grammar", "language_level": "A2", "topic": "t"},
+		]
+
+		with self.assertRaises(BlueprintError) as caught:
+			select_questions(segments, pool, seed="x")
+
+		message = str(caught.exception)
+		self.assertIn("Grammar/A1", message, f"the failing segment is not named: {message}")
+		self.assertIn("overlap", message, f"the reason is not explained: {message}")
+
+	def test_a_displaced_segment_still_prefers_an_unseen_question(self):
+		"""Making room for a constrained segment must not cost exposure control.
+
+		The broad segment has to give up A1 so the A1 segment can have
+		it. Where it goes instead is the test: A2 is unseen and B1 is
+		not, so a retake must land on A2.
+		"""
+		segments = [
+			Segment(count=1, skill="Grammar"),
+			Segment(count=1, skill="Grammar", level="A1"),
+		]
+		pool = [
+			{"name": "GR-A1", "language_skill": "Grammar", "language_level": "A1", "topic": "t"},
+			{"name": "GR-A2", "language_skill": "Grammar", "language_level": "A2", "topic": "t"},
+			{"name": "GR-B1", "language_skill": "Grammar", "language_level": "B1", "topic": "t"},
+		]
+
+		for i in range(200):
+			with self.subTest(seed=i):
+				selected = select_questions(
+					segments, pool, seed=f"exp-{i}", seen={"GR-B1"}
+				)
+				self.assertEqual(selected, ["GR-A2", "GR-A1"])
+
+	def test_a_question_is_never_reused_across_overlapping_segments(self):
+		segments = [
+			Segment(count=2, skill="Grammar"),
+			Segment(count=2, skill="Grammar", level="A1"),
+			Segment(count=1, level="A1"),
+		]
+		selected = select_questions(segments, make_pool(), seed="reuse")
+
+		self.assertEqual(len(selected), 5)
+		self.assertEqual(len(set(selected)), 5, "a question was placed in two segments")
+
 	def test_extra_count_distributed_without_duplicates(self):
 		selected = select_questions(SEGMENTS, make_pool(), seed="x", extra_count=5)
 		self.assertEqual(len(selected), 15)
