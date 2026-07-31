@@ -121,9 +121,31 @@ def _marshal_attempt(attempt) -> dict:
 		"status": attempt.status,
 		"attempt_number": attempt.attempt_number,
 		"started_at": attempt.started_at,
+		"remaining_seconds": _remaining_seconds(attempt, blueprint.duration),
 		"questions": [marshal_question(row.question) for row in attempt.questions],
 		"answers": {row.question: row.answer for row in attempt.questions if row.answer},
 	}
+
+
+def _remaining_seconds(attempt, duration) -> int | None:
+	"""Time left, decided here rather than in the browser.
+
+	`started_at` is a naive timestamp in the site's timezone. A client
+	parsing it with `new Date()` reads it as *local* time, so a student
+	ahead of the server computes a deadline already past and is submitted
+	the moment the page loads — the further east, the worse. Sending the
+	remainder instead removes the arithmetic from where the timezone is
+	unknown, and makes the clock server-authoritative as §4.7.3 requires.
+
+	Includes the same grace as `is_expired`, so the client's countdown and
+	the server's expiry check agree on when time is up.
+	"""
+	if not duration or attempt.status != "In Progress" or not attempt.started_at:
+		return None
+	deadline = add_to_date(
+		get_datetime(attempt.started_at), minutes=int(duration), seconds=SUBMIT_GRACE_SECONDS
+	)
+	return max(0, int((deadline - now_datetime()).total_seconds()))
 
 
 @frappe.whitelist()

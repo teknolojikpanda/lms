@@ -144,7 +144,7 @@
 <script setup>
 import { Badge, Breadcrumbs, Button, FormControl, createResource, toast, usePageMeta } from 'frappe-ui'
 import { computed, inject, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { sessionStore } from '@/stores/session'
 import { formatSeconds } from '@/utils/format'
 import {
@@ -164,6 +164,7 @@ const props = defineProps({
 const { brand } = sessionStore()
 const user = inject('$user')
 const router = useRouter()
+const route = useRoute()
 
 const attempt = ref(null)
 const result = ref(null)
@@ -186,7 +187,21 @@ onMounted(async () => {
 		router.push({ name: 'Courses' })
 		return
 	}
+	// Arriving to *read* a result must never begin a new attempt. The list
+	// page labels the button "View Result" once one exists, but it routed
+	// here all the same — and this mount starts a test, spending one of the
+	// student's remaining attempts to show them a score they already had.
+	if (route.query.attempt) {
+		try {
+			result.value = await getPlacementResult(route.query.attempt)
+		} catch (error) {
+			loadError.value = error.message
+		}
+		return
+	}
+
 	try {
+		const requestedAt = Date.now()
 		const data = await startPlacement(props.blueprintName)
 		if (data.status === 'Completed') {
 			result.value = await getPlacementResult(data.name)
@@ -194,7 +209,7 @@ onMounted(async () => {
 		}
 		attempt.value = data
 		Object.assign(answers, parseSavedAnswers(data.answers || {}))
-		startTimer(data)
+		startTimer(data, requestedAt)
 	} catch (error) {
 		// Most common cause: attempts exhausted — try to show the last result.
 		await showLatestResult(error)
@@ -244,10 +259,36 @@ const showLatestResult = async (error) => {
 	loadError.value = error.message
 }
 
-const startTimer = (data) => {
-	if (!data.duration) return
-	const startedAt = new Date(String(data.started_at).replace(' ', 'T'))
-	const deadline = startedAt.getTime() + data.duration * 60 * 1000
+const startTimer = (data, requestedAt) => {
+	// The server sends what is left, not when the attempt began. `started_at`
+	// is a naive timestamp in the site's timezone, and `new Date()` reads it
+	// as local time — so a student ahead of the server computed a deadline
+	// already in the past and was submitted the instant the page loaded.
+	//
+	// Anchored to when the request *started*. The server measured the
+	// remainder at some unknown instant while it was in flight, so any
+	// later anchor can put the client's zero after the server's — and
+	// autosaves in that gap finalise an attempt the student still sees
+	// time on, discarding whatever they had not saved. Anchoring at the
+	// start cannot: it is at or before the measurement, so the countdown
+	// runs a little early and never late. The cost is up to one round trip
+	// of exam time, against a duration measured in tens of minutes.
+	//
+	// A remainder rather than an absolute server deadline, deliberately.
+	// An absolute deadline is immune to latency but not to a wrong device
+	// clock, and a device can be minutes out where a request is rarely a
+	// second — that trades a small bounded error for a large unbounded one.
+	//
+	// The known cost, accepted: on a *new* attempt the server sets
+	// `started_at` after choosing the questions, so anchoring at the
+	// request's start charges that setup to the student. It is the same
+	// order as the round trip and always against them — but
+	// the alternative is a clock that can outlast the server's, and an
+	// autosave landing in that window finalises the attempt and discards
+	// unsaved answers. Losing a second of an exam beats losing an answer.
+	if (data.remaining_seconds === null || data.remaining_seconds === undefined) return
+	const measuredNoLaterThan = requestedAt || Date.now()
+	const deadline = measuredNoLaterThan + data.remaining_seconds * 1000
 	const tick = () => {
 		remainingSeconds.value = Math.max(0, Math.round((deadline - Date.now()) / 1000))
 		if (remainingSeconds.value <= 0) {
