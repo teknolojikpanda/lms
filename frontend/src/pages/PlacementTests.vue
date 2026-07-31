@@ -36,9 +36,18 @@
 						<Badge :label="latestResult(blueprint.name)" theme="green" />
 					</div>
 				</div>
-				<Button variant="solid" @click="openTest(blueprint.name)">
-					{{ latestResult(blueprint.name) ? __('View Result') : __('Start Test') }}
-				</Button>
+				<div class="flex items-center gap-2">
+					<Button v-if="completedAttempt(blueprint.name)" @click="viewResult(blueprint.name)">
+						{{ __('View Result') }}
+					</Button>
+					<Button
+						v-if="canTake(blueprint)"
+						variant="solid"
+						@click="takeTest(blueprint.name)"
+					>
+						{{ startLabel(blueprint.name) }}
+					</Button>
+				</div>
 			</div>
 		</div>
 		<div
@@ -75,35 +84,60 @@ const blueprints = createResource({
 	auto: true,
 })
 
+// Every attempt, not only the completed ones: the page needs to count them
+// against `max_attempts` and to spot an attempt still in progress.
 const attempts = createResource({
 	url: 'frappe.client.get_list',
 	params: {
 		doctype: 'LMS Placement Attempt',
-		filters: { status: 'Completed' },
-		fields: ['name', 'blueprint', 'result_level', 'override_level', 'submitted_at'],
-		order_by: 'submitted_at desc',
+		fields: ['name', 'blueprint', 'status', 'result_level', 'override_level', 'creation'],
+		order_by: 'creation desc',
+		limit_page_length: 0,
 	},
 	auto: true,
 })
 
-const latestAttempt = (blueprint) =>
-	attempts.data?.find((row) => row.blueprint === blueprint) || null
+const forBlueprint = (blueprint) =>
+	(attempts.data || []).filter((row) => row.blueprint === blueprint)
+
+const completedAttempt = (blueprint) =>
+	forBlueprint(blueprint).find((row) => row.status === 'Completed') || null
+
+const inProgressAttempt = (blueprint) =>
+	forBlueprint(blueprint).find((row) => row.status === 'In Progress') || null
 
 const latestResult = (blueprint) => {
-	const attempt = latestAttempt(blueprint)
+	const attempt = completedAttempt(blueprint)
 	return attempt ? attempt.override_level || attempt.result_level : null
 }
 
-const openTest = (blueprintName) => {
-	// The button says "View Result" once one exists, so it must not start a
-	// test. Naming the attempt tells the page to read it rather than begin
-	// a new one — which previously spent one of the student's attempts.
-	const attempt = latestAttempt(blueprintName)
+// Viewing a result and taking the test are separate actions. Collapsing
+// them into one button meant that once a result existed, every remaining
+// retake — and any attempt still in progress — became unreachable.
+const canTake = (blueprint) => {
+	if (inProgressAttempt(blueprint.name)) return true
+	if (!blueprint.max_attempts) return true
+	return forBlueprint(blueprint.name).length < blueprint.max_attempts
+}
+
+const startLabel = (blueprint) => {
+	if (inProgressAttempt(blueprint)) return __('Resume')
+	return completedAttempt(blueprint) ? __('Retake') : __('Start Test')
+}
+
+const viewResult = (blueprintName) => {
+	// Naming the attempt tells the page to read it rather than begin a new
+	// one, which previously spent one of the student's attempts.
+	const attempt = completedAttempt(blueprintName)
 	router.push({
 		name: 'PlacementAttempt',
 		params: { blueprintName },
-		...(attempt ? { query: { attempt: attempt.name } } : {}),
+		query: { attempt: attempt.name },
 	})
+}
+
+const takeTest = (blueprintName) => {
+	router.push({ name: 'PlacementAttempt', params: { blueprintName } })
 }
 
 usePageMeta(() => {

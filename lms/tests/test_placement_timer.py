@@ -102,6 +102,36 @@ class TestPlacementTimer(IntegrationTestCase):
 		attempt = self._attempt(add_to_date(now_datetime(), days=-3))
 		self.assertGreaterEqual(_marshal_attempt(attempt)["remaining_seconds"], 0)
 
+	def test_an_untimed_blueprint_has_no_clock(self):
+		"""No duration means no deadline, not a deadline of zero.
+
+		A remainder of 0 would make the client submit immediately; None
+		tells it there is no timer to run.
+		"""
+		untimed = self._make(
+			{
+				"doctype": "LMS Placement Blueprint",
+				"title": f"Untimed bp {self.hash}",
+				"duration": 0,
+				"default_level": "A1",
+				"enabled": 1,
+				"segments": [
+					{"question_count": 1, "skill": "Reading", "level": "A1", "topic": f"timer-{self.hash}"}
+				],
+				"level_mappings": [{"min_score": 0, "level": "A1"}],
+			}
+		)
+		attempt = self._make(
+			{
+				"doctype": "LMS Placement Attempt",
+				"member": "Administrator",
+				"blueprint": untimed.name,
+				"status": "In Progress",
+				"questions": [{"question": self.questions[0], "marks": 1}],
+			}
+		)
+		self.assertIsNone(_marshal_attempt(attempt)["remaining_seconds"])
+
 	def test_a_finished_attempt_has_no_clock(self):
 		attempt = self._attempt(add_to_date(now_datetime(), minutes=-5), status="Completed")
 		self.assertIsNone(_marshal_attempt(attempt)["remaining_seconds"])
