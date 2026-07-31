@@ -265,19 +265,22 @@ const startTimer = (data, requestedAt) => {
 	// as local time — so a student ahead of the server computed a deadline
 	// already in the past and was submitted the instant the page loaded.
 	//
-	// Anchored to the midpoint of the request rather than its end. The
-	// server measured the remainder at some unknown instant while the
-	// request was in flight; anchoring at the end assumes it measured last,
-	// which pushes the client's zero past the server's by the whole
-	// round trip, and autosaves in that gap finalise an attempt the student
-	// still sees time on.
+	// Anchored to when the request *started*. The server measured the
+	// remainder at some unknown instant while it was in flight, so any
+	// later anchor can put the client's zero after the server's — and
+	// autosaves in that gap finalise an attempt the student still sees
+	// time on, discarding whatever they had not saved. Anchoring at the
+	// start cannot: it is at or before the measurement, so the countdown
+	// runs a little early and never late. The cost is up to one round trip
+	// of exam time, against a duration measured in tens of minutes.
 	//
-	// A remainder rather than an absolute deadline on purpose: an absolute
-	// one is immune to latency but not to a wrong device clock, and a
-	// device can be minutes out where a request is rarely a second.
+	// A remainder rather than an absolute server deadline, deliberately.
+	// An absolute deadline is immune to latency but not to a wrong device
+	// clock, and a device can be minutes out where a request is rarely a
+	// second — that trades a small bounded error for a large unbounded one.
 	if (data.remaining_seconds === null || data.remaining_seconds === undefined) return
-	const measuredAt = requestedAt ? (requestedAt + Date.now()) / 2 : Date.now()
-	const deadline = measuredAt + data.remaining_seconds * 1000
+	const measuredNoLaterThan = requestedAt || Date.now()
+	const deadline = measuredNoLaterThan + data.remaining_seconds * 1000
 	const tick = () => {
 		remainingSeconds.value = Math.max(0, Math.round((deadline - Date.now()) / 1000))
 		if (remainingSeconds.value <= 0) {

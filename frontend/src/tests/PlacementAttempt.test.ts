@@ -123,11 +123,12 @@ describe('PlacementAttempt', () => {
 		expect(wrapper.vm.remainingSeconds).toBeGreaterThan(3000)
 	})
 
-	it('does not let a slow request push the clock past the server', async () => {
-		// The server measured the remainder somewhere inside the request.
-		// Anchoring at the end assumes it measured last, so the client's
-		// zero lands a whole round trip after the server's — and autosaves
-		// in that gap finalise an attempt the student still sees time on.
+	it('never lets a slow request push the clock past the server', async () => {
+		// The server measured the remainder somewhere inside the request, so
+		// any anchor after its start risks a client zero later than the
+		// server's — and autosaves in that gap finalise an attempt the
+		// student still sees time on, losing unsaved answers. Anchoring at
+		// the start runs early instead, which is the safe direction.
 		startPlacement.mockImplementation(
 			() =>
 				new Promise((resolve) =>
@@ -142,19 +143,24 @@ describe('PlacementAttempt', () => {
 								questions: [],
 								answers: {},
 							}),
-						120
+						1200
 					)
 				)
 		)
 
 		const wrapper = mountPage()
-		await flushPromises()
-		await new Promise((resolve) => setTimeout(resolve, 150))
+		// Past the request itself (1.2s) and then some: flushPromises does
+		// not advance real timers, so waiting less leaves the mock unresolved
+		// and no timer started at all.
+		await new Promise((resolve) => setTimeout(resolve, 1600))
 		await flushPromises()
 
-		// Anchored at the end this would still read a full 60; the midpoint
-		// gives back roughly half the round trip.
-		expect(wrapper.vm.remainingSeconds).toBeLessThanOrEqual(60)
+		// A 1.2s request then 0.4s of waiting. Anchored at the request's
+		// end the clock reads 60 with only 0.4s spent — later than the
+		// server, which measured 1.2s ago. Anchored at its start the whole
+		// 1.6s is gone. The delays exceed the display's rounding, which
+		// otherwise hides a sub-second difference.
+		expect(wrapper.vm.remainingSeconds).toBeLessThanOrEqual(59)
 	})
 
 	it('does not run a timer when the server sends no remainder', async () => {
