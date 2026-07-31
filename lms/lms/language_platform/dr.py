@@ -15,9 +15,12 @@ record of an exercise having been done.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from pathlib import Path
+
 import frappe
 from frappe import _
-from frappe.utils import get_datetime, now_datetime
+from frappe.utils import convert_utc_to_system_timezone, get_datetime, now_datetime
 
 from lms.lms.language_platform.dr_rules import (
 	DR_DRILL_INTERVAL_DAYS,
@@ -35,13 +38,36 @@ def _settings():
 	return frappe.get_cached_doc("LMS Language Settings")
 
 
-def _last_backup_time():
-	"""Most recent site backup Frappe knows about.
+BACKUP_DUMP_GLOB = "*-database.sql.gz"
 
-	Reads the backup the bench actually produced rather than a value
-	someone typed in, so the RPO figure reflects reality. Returns None
-	when nothing is discoverable — reported as unknown, never as healthy.
+
+def _latest_backup_on_disk():
+	"""Newest database dump `bench backup` actually wrote.
+
+	This is where backups live. `bench backup` writes to
+	``sites/<site>/private/backups`` and creates no File document, which
+	is why `provisioning/provision_tenant._verify_backup` looks there too.
+	Reading File rows instead found nothing on a correctly backed-up site
+	and reported the RPO as unknown — a panel that says "no idea" no
+	matter how healthy the platform is tells an operator nothing, and
+	trains them to ignore it.
 	"""
+	try:
+		directory = Path(frappe.get_site_path("private", "backups"))
+		dumps = list(directory.glob(BACKUP_DUMP_GLOB))
+		if not dumps:
+			return None
+		newest = max(dump.stat().st_mtime for dump in dumps)
+		# mtime is epoch UTC; everything else here is site-local naive.
+		return convert_utc_to_system_timezone(
+			datetime.fromtimestamp(newest, tz=timezone.utc)
+		).replace(tzinfo=None)
+	except Exception:
+		return None
+
+
+def _latest_backup_file_doc():
+	"""A dump recorded as a File, for deployments that attach them."""
 	try:
 		row = frappe.db.get_value(
 			"File",
@@ -52,6 +78,21 @@ def _last_backup_time():
 		return get_datetime(row) if row else None
 	except Exception:
 		return None
+
+
+def _last_backup_time():
+	"""Most recent backup this site can see, from whichever source has one.
+
+	Returns None when neither has anything — reported as unknown, never as
+	healthy. Note that a snapshot-based strategy (AWS Backup, RDS
+	automated backups) writes neither a file here nor a File row, so a
+	platform relying solely on those reads as unknown. That is honest
+	rather than wrong: this process genuinely cannot see them, and saying
+	so is better than reporting a freshness it did not measure.
+	"""
+	candidates = [_latest_backup_on_disk(), _latest_backup_file_doc()]
+	found = [stamp for stamp in candidates if stamp]
+	return max(found) if found else None
 
 
 @frappe.whitelist()
