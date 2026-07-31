@@ -66,7 +66,7 @@ def _latest_backup_on_disk():
 	trains them to ignore it.
 	"""
 	try:
-		written = []
+		mtimes = []
 		for path in _backup_directory().glob(BACKUP_DUMP_GLOB):
 			stat = path.stat()
 			# A zero-byte dump is a successful `bench backup` and a
@@ -76,8 +76,8 @@ def _latest_backup_on_disk():
 			# stopped working. `provision_tenant._verify_backup` refuses
 			# these before a purge for the same reason.
 			if stat.st_size > 0:
-				written.append(stat.st_mtime)
-		if not written:
+				mtimes.append(stat.st_mtime)
+		if not mtimes:
 			return None
 
 		# Age is elapsed seconds, then expressed against the same naive
@@ -88,9 +88,14 @@ def _latest_backup_on_disk():
 		# and hides a breach. Elapsed time has no such ambiguity.
 		# max(..., 0) keeps a clock-skewed future mtime from reading as a
 		# backup taken later than now.
-		elapsed = max(time.time() - max(written), 0)
+		elapsed = max(time.time() - max(mtimes), 0)
 		return now_datetime() - timedelta(seconds=elapsed)
 	except Exception:
+		# Reads as unknown, which is the honest answer — but an unreadable
+		# backup directory and an empty one are very different problems,
+		# and only the log can tell them apart. Not an Error Log: this runs
+		# on every dashboard poll.
+		frappe.logger("lms.dr").warning("could not read the backup directory", exc_info=True)
 		return None
 
 
