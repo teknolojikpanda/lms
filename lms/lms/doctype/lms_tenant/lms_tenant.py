@@ -18,6 +18,7 @@ tenant site itself.
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.model.rename_doc import rename_doc
 from frappe.rate_limiter import rate_limit
 from frappe.utils import get_datetime, now_datetime
 
@@ -57,6 +58,48 @@ class LMSTenant(Document):
 	def validate(self):
 		self.validate_subdomain_field()
 		self.validate_seat_limit()
+
+	def before_save(self):
+		self.rename_to_match_subdomain()
+
+	def rename_to_match_subdomain(self):
+		"""Carry the document name along when the subdomain is corrected.
+
+		``autoname: field:subdomain`` fixes the name at insert.
+		`validate_subdomain_field` deliberately allows the field to change
+		while the tenant is still Requested — correcting a typo before any
+		site exists is exactly what that branch is for — but the change
+		never survived the save: frappe's own `_sync_autoname_field` runs
+		afterwards and copies `name` back over the field, so the edit was
+		accepted, discarded, and reported as saved.
+
+		That matters because every server-side entry point reaches a
+		tenant *by subdomain* — `mark_provisioning`, `mark_provisioned`,
+		`record_archival_artifacts`, `assert_purge_allowed` and
+		`mark_purged` all call ``frappe.get_doc("LMS Tenant", subdomain)``,
+		and `register_tenant` hands the operator a CLI command built from
+		the field. An owner who fixed a typo, saw no error, and ran the
+		command they were given got "not found", with a registry that
+		still showed the typo.
+
+		So rename first and let frappe's sync agree with the new name,
+		rather than fight it. This has to happen in `before_save`: by
+		`on_update` the field has already been reverted and there is
+		nothing left to detect.
+
+		`force` because the doctype does not set `allow_rename` — this is
+		not an operator renaming a record but the consequence of a save.
+		`ignore_permissions` because `check_permission("write")` has
+		already run on this save, so re-deriving it here can only fail
+		spuriously.
+		"""
+		if self.is_new() or self.name == self.subdomain:
+			return
+
+		rename_doc(self.doctype, self.name, self.subdomain, force=True, ignore_permissions=True)
+		# The rest of the save — `db_update`, the version row, the global
+		# search entry, `on_update` — addresses the row by `self.name`.
+		self.name = self.subdomain
 
 	def validate_subdomain_field(self):
 		try:
