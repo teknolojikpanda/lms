@@ -278,6 +278,14 @@ const startTimer = (data, requestedAt) => {
 	// An absolute deadline is immune to latency but not to a wrong device
 	// clock, and a device can be minutes out where a request is rarely a
 	// second — that trades a small bounded error for a large unbounded one.
+	//
+	// The known cost, accepted: on a *new* attempt the server sets
+	// `started_at` after choosing the questions, so anchoring at the
+	// request's start charges that setup to the student. It is the same
+	// order as the round trip and always against them — but
+	// the alternative is a clock that can outlast the server's, and an
+	// autosave landing in that window finalises the attempt and discards
+	// unsaved answers. Losing a second of an exam beats losing an answer.
 	if (data.remaining_seconds === null || data.remaining_seconds === undefined) return
 	const measuredNoLaterThan = requestedAt || Date.now()
 	const deadline = measuredNoLaterThan + data.remaining_seconds * 1000
