@@ -144,7 +144,7 @@
 <script setup>
 import { Badge, Breadcrumbs, Button, FormControl, createResource, toast, usePageMeta } from 'frappe-ui'
 import { computed, inject, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { sessionStore } from '@/stores/session'
 import { formatSeconds } from '@/utils/format'
 import {
@@ -164,6 +164,7 @@ const props = defineProps({
 const { brand } = sessionStore()
 const user = inject('$user')
 const router = useRouter()
+const route = useRoute()
 
 const attempt = ref(null)
 const result = ref(null)
@@ -186,6 +187,19 @@ onMounted(async () => {
 		router.push({ name: 'Courses' })
 		return
 	}
+	// Arriving to *read* a result must never begin a new attempt. The list
+	// page labels the button "View Result" once one exists, but it routed
+	// here all the same — and this mount starts a test, spending one of the
+	// student's remaining attempts to show them a score they already had.
+	if (route.query.attempt) {
+		try {
+			result.value = await getPlacementResult(route.query.attempt)
+		} catch (error) {
+			loadError.value = error.message
+		}
+		return
+	}
+
 	try {
 		const data = await startPlacement(props.blueprintName)
 		if (data.status === 'Completed') {
@@ -245,9 +259,14 @@ const showLatestResult = async (error) => {
 }
 
 const startTimer = (data) => {
-	if (!data.duration) return
-	const startedAt = new Date(String(data.started_at).replace(' ', 'T'))
-	const deadline = startedAt.getTime() + data.duration * 60 * 1000
+	// The server sends what is left, not when the attempt began. `started_at`
+	// is a naive timestamp in the site's timezone, and `new Date()` reads it
+	// as local time — so a student ahead of the server computed a deadline
+	// already in the past and was submitted the instant the page loaded.
+	// The deadline is anchored to this device's clock only for the duration
+	// of the countdown; the server decides expiry either way.
+	if (data.remaining_seconds === null || data.remaining_seconds === undefined) return
+	const deadline = Date.now() + data.remaining_seconds * 1000
 	const tick = () => {
 		remainingSeconds.value = Math.max(0, Math.round((deadline - Date.now()) / 1000))
 		if (remainingSeconds.value <= 0) {

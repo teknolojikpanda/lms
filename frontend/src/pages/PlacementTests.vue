@@ -86,13 +86,24 @@ const attempts = createResource({
 	auto: true,
 })
 
+const latestAttempt = (blueprint) =>
+	attempts.data?.find((row) => row.blueprint === blueprint) || null
+
 const latestResult = (blueprint) => {
-	const attempt = attempts.data?.find((row) => row.blueprint === blueprint)
+	const attempt = latestAttempt(blueprint)
 	return attempt ? attempt.override_level || attempt.result_level : null
 }
 
 const openTest = (blueprintName) => {
-	router.push({ name: 'PlacementAttempt', params: { blueprintName } })
+	// The button says "View Result" once one exists, so it must not start a
+	// test. Naming the attempt tells the page to read it rather than begin
+	// a new one — which previously spent one of the student's attempts.
+	const attempt = latestAttempt(blueprintName)
+	router.push({
+		name: 'PlacementAttempt',
+		params: { blueprintName },
+		...(attempt ? { query: { attempt: attempt.name } } : {}),
+	})
 }
 
 usePageMeta(() => {
