@@ -123,6 +123,40 @@ describe('PlacementAttempt', () => {
 		expect(wrapper.vm.remainingSeconds).toBeGreaterThan(3000)
 	})
 
+	it('does not let a slow request push the clock past the server', async () => {
+		// The server measured the remainder somewhere inside the request.
+		// Anchoring at the end assumes it measured last, so the client's
+		// zero lands a whole round trip after the server's — and autosaves
+		// in that gap finalise an attempt the student still sees time on.
+		startPlacement.mockImplementation(
+			() =>
+				new Promise((resolve) =>
+					setTimeout(
+						() =>
+							resolve({
+								name: 'ATT-0004',
+								status: 'In Progress',
+								blueprint_title: 'Placement',
+								duration: 1,
+								remaining_seconds: 60,
+								questions: [],
+								answers: {},
+							}),
+						120
+					)
+				)
+		)
+
+		const wrapper = mountPage()
+		await flushPromises()
+		await new Promise((resolve) => setTimeout(resolve, 150))
+		await flushPromises()
+
+		// Anchored at the end this would still read a full 60; the midpoint
+		// gives back roughly half the round trip.
+		expect(wrapper.vm.remainingSeconds).toBeLessThanOrEqual(60)
+	})
+
 	it('does not run a timer when the server sends no remainder', async () => {
 		startPlacement.mockResolvedValue({
 			name: 'ATT-0003',

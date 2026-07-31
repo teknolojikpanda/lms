@@ -201,6 +201,7 @@ onMounted(async () => {
 	}
 
 	try {
+		const requestedAt = Date.now()
 		const data = await startPlacement(props.blueprintName)
 		if (data.status === 'Completed') {
 			result.value = await getPlacementResult(data.name)
@@ -208,7 +209,7 @@ onMounted(async () => {
 		}
 		attempt.value = data
 		Object.assign(answers, parseSavedAnswers(data.answers || {}))
-		startTimer(data)
+		startTimer(data, requestedAt)
 	} catch (error) {
 		// Most common cause: attempts exhausted — try to show the last result.
 		await showLatestResult(error)
@@ -258,15 +259,25 @@ const showLatestResult = async (error) => {
 	loadError.value = error.message
 }
 
-const startTimer = (data) => {
+const startTimer = (data, requestedAt) => {
 	// The server sends what is left, not when the attempt began. `started_at`
 	// is a naive timestamp in the site's timezone, and `new Date()` reads it
 	// as local time — so a student ahead of the server computed a deadline
 	// already in the past and was submitted the instant the page loaded.
-	// The deadline is anchored to this device's clock only for the duration
-	// of the countdown; the server decides expiry either way.
+	//
+	// Anchored to the midpoint of the request rather than its end. The
+	// server measured the remainder at some unknown instant while the
+	// request was in flight; anchoring at the end assumes it measured last,
+	// which pushes the client's zero past the server's by the whole
+	// round trip, and autosaves in that gap finalise an attempt the student
+	// still sees time on.
+	//
+	// A remainder rather than an absolute deadline on purpose: an absolute
+	// one is immune to latency but not to a wrong device clock, and a
+	// device can be minutes out where a request is rarely a second.
 	if (data.remaining_seconds === null || data.remaining_seconds === undefined) return
-	const deadline = Date.now() + data.remaining_seconds * 1000
+	const measuredAt = requestedAt ? (requestedAt + Date.now()) / 2 : Date.now()
+	const deadline = measuredAt + data.remaining_seconds * 1000
 	const tick = () => {
 		remainingSeconds.value = Math.max(0, Math.round((deadline - Date.now()) / 1000))
 		if (remainingSeconds.value <= 0) {
