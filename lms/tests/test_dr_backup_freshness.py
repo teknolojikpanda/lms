@@ -16,6 +16,7 @@ from frappe.utils import add_to_date, now_datetime
 
 from lms.lms.language_platform.dr_rules import STATUS_UNKNOWN
 from lms.lms.language_platform.dr import (
+	_backup_directory,
 	_last_backup_time,
 	_latest_backup_on_disk,
 	get_dr_readiness,
@@ -26,7 +27,7 @@ class TestBackupFreshness(IntegrationTestCase):
 	def setUp(self):
 		super().setUp()
 		frappe.set_user("Administrator")
-		self.backups = Path(frappe.get_site_path("private", "backups"))
+		self.backups = _backup_directory()
 		self.backups.mkdir(parents=True, exist_ok=True)
 		self.written = []
 
@@ -38,8 +39,11 @@ class TestBackupFreshness(IntegrationTestCase):
 		super().tearDown()
 
 	def _write_dump(self, name, age_minutes=0):
+		return self._write_dump_at(self.backups, name, age_minutes)
+
+	def _write_dump_at(self, directory, name, age_minutes=0):
 		"""A dump on disk, aged by setting its mtime like a real one."""
-		path = self.backups / name
+		path = directory / name
 		path.write_bytes(b"not a real dump")
 		self.written.append(path)
 		if age_minutes:
@@ -100,6 +104,32 @@ class TestBackupFreshness(IntegrationTestCase):
 		self.assertNotEqual(rpo["status"], STATUS_UNKNOWN, "the stale dump was not even found")
 		self.assertNotEqual(rpo["status"], "ok", "a stale backup passed the RPO check")
 		self.assertIsNotNone(rpo["age_minutes"])
+
+	def test_a_relocated_backup_directory_is_followed(self):
+		"""A site that moves `backup_path` is still backed up.
+
+		Hardcoding `private/backups` would call it unbacked-up — the same
+		mistake as reading File rows, one directory along.
+		"""
+		# Built without asking _backup_directory(), or the test would just
+		# agree with whatever that returns and prove nothing.
+		relative = f"private/backups-moved-{frappe.generate_hash(length=5)}"
+		moved = Path(frappe.get_site_path(relative))
+		moved.mkdir(parents=True, exist_ok=True)
+		self.addCleanup(lambda: moved.exists() and moved.rmdir())
+
+		frappe.local.conf["backup_path"] = relative
+		self.addCleanup(frappe.local.conf.pop, "backup_path", None)
+
+		self.assertFalse(
+			list(self.backups.glob("*-database.sql.gz")),
+			"the default directory holds a dump, so this test cannot tell the two apart",
+		)
+		self._write_dump_at(moved, "20260731_120000-staging-database.sql.gz", age_minutes=4)
+
+		found = _latest_backup_on_disk()
+		self.assertIsNotNone(found, "a dump in the configured backup directory was not seen")
+		self.assertAlmostEqual((now_datetime() - found).total_seconds() / 60, 4, delta=2)
 
 	def test_a_file_document_still_counts(self):
 		"""Deployments that attach dumps keep working."""

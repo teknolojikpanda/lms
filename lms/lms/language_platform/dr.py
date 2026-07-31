@@ -41,20 +41,31 @@ def _settings():
 BACKUP_DUMP_GLOB = "*-database.sql.gz"
 
 
+def _backup_directory():
+	"""Where this site's dumps land, honouring a relocated ``backup_path``.
+
+	Asking frappe rather than hardcoding ``private/backups``: a site that
+	moves its backups via site config would otherwise look unbacked-up,
+	which is the same class of mistake as reading File rows.
+	"""
+	from frappe.utils.backups import get_backup_path
+
+	return Path(get_backup_path())
+
+
 def _latest_backup_on_disk():
 	"""Newest database dump `bench backup` actually wrote.
 
-	This is where backups live. `bench backup` writes to
-	``sites/<site>/private/backups`` and creates no File document, which
-	is why `provisioning/provision_tenant._verify_backup` looks there too.
+	This is where backups live. `bench backup` writes to the site's backup
+	directory and creates no File document, which is why
+	`provisioning/provision_tenant._verify_backup` looks there too.
 	Reading File rows instead found nothing on a correctly backed-up site
 	and reported the RPO as unknown — a panel that says "no idea" no
 	matter how healthy the platform is tells an operator nothing, and
 	trains them to ignore it.
 	"""
 	try:
-		directory = Path(frappe.get_site_path("private", "backups"))
-		dumps = list(directory.glob(BACKUP_DUMP_GLOB))
+		dumps = list(_backup_directory().glob(BACKUP_DUMP_GLOB))
 		if not dumps:
 			return None
 		newest = max(dump.stat().st_mtime for dump in dumps)
