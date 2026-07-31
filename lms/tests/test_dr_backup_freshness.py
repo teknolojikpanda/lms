@@ -27,29 +27,69 @@ class TestBackupFreshness(IntegrationTestCase):
 	def setUp(self):
 		super().setUp()
 		frappe.set_user("Administrator")
-		self.backups = _backup_directory()
+		# A dump left by a real `bench backup` on this site would decide
+		# these tests instead of the fixtures — the newest one wins, and it
+		# would not be ours. Each test gets an empty directory of its own,
+		# via the same site-config knob a deployment would use.
+		relative = f"private/test-backups-{frappe.generate_hash(length=8)}"
+		frappe.local.conf["backup_path"] = relative
+		self.addCleanup(frappe.local.conf.pop, "backup_path", None)
+
+		self.backups = Path(frappe.get_site_path(relative))
 		self.backups.mkdir(parents=True, exist_ok=True)
-		self.written = []
+		self.addCleanup(self._remove_directory, self.backups)
 
 	def tearDown(self):
-		for path in self.written:
-			if path.exists():
-				path.unlink()
 		frappe.db.commit()
 		super().tearDown()
 
-	def _write_dump(self, name, age_minutes=0):
-		return self._write_dump_at(self.backups, name, age_minutes)
+	def _remove_directory(self, directory):
+		if not directory.exists():
+			return
+		for leftover in directory.iterdir():
+			leftover.unlink()
+		directory.rmdir()
 
-	def _write_dump_at(self, directory, name, age_minutes=0):
+	def _write_dump(self, name, age_minutes=0, content=b"not a real dump"):
+		return self._write_dump_at(self.backups, name, age_minutes, content)
+
+	def _write_dump_at(self, directory, name, age_minutes=0, content=b"not a real dump"):
 		"""A dump on disk, aged by setting its mtime like a real one."""
 		path = directory / name
-		path.write_bytes(b"not a real dump")
-		self.written.append(path)
+		path.write_bytes(content)
+		self.addCleanup(lambda: path.exists() and path.unlink())
 		if age_minutes:
 			stamp = time.time() - age_minutes * 60
 			os.utime(path, (stamp, stamp))
 		return path
+
+	def test_the_default_location_is_the_site_backup_directory(self):
+		"""With nothing configured, look where `bench backup` writes."""
+		frappe.local.conf.pop("backup_path", None)
+
+		self.assertEqual(
+			_backup_directory().resolve(),
+			Path(frappe.get_site_path("private", "backups")).resolve(),
+		)
+
+	def test_an_empty_dump_is_not_a_backup(self):
+		"""A failed backup leaves a zero-byte file with a fresh mtime."""
+		self._write_dump("20260731_120000-staging-database.sql.gz", content=b"")
+
+		self.assertIsNone(_latest_backup_on_disk(), "an empty dump was counted as a backup")
+
+	def test_an_empty_dump_does_not_shadow_a_good_one(self):
+		"""The failure mode that matters: last night's backup broke.
+
+		A zero-byte dump written minutes ago must not make yesterday's
+		real one look current — that reports healthy exactly when the
+		backups have stopped working.
+		"""
+		self._write_dump("20260730_090000-staging-database.sql.gz", age_minutes=90)
+		self._write_dump("20260731_120000-staging-database.sql.gz", content=b"")
+
+		age = (now_datetime() - _latest_backup_on_disk()).total_seconds() / 60
+		self.assertAlmostEqual(age, 90, delta=2, msg="an empty dump was taken as the backup")
 
 	def test_a_dump_on_disk_is_found(self):
 		"""The defect: only File rows were consulted, so this was missed."""
@@ -91,6 +131,10 @@ class TestBackupFreshness(IntegrationTestCase):
 		self.assertEqual(
 			rpo["status"], "ok", f"a one-minute-old backup did not read as within RPO: {rpo}"
 		)
+		# The status alone would still be "ok" if the age were computed
+		# wrongly but happened to land under the target.
+		self.assertIsNotNone(rpo["age_minutes"], f"no age reported: {rpo}")
+		self.assertLess(rpo["age_minutes"], 5, f"a one-minute-old backup aged wrongly: {rpo}")
 
 	def test_a_stale_backup_breaches_the_target(self):
 		settings = frappe.get_cached_doc("LMS Language Settings")
@@ -119,13 +163,11 @@ class TestBackupFreshness(IntegrationTestCase):
 		self.addCleanup(lambda: moved.exists() and moved.rmdir())
 
 		frappe.local.conf["backup_path"] = relative
-		self.addCleanup(frappe.local.conf.pop, "backup_path", None)
-
+		self._write_dump_at(moved, "20260731_120000-staging-database.sql.gz", age_minutes=4)
 		self.assertFalse(
 			list(self.backups.glob("*-database.sql.gz")),
-			"the default directory holds a dump, so this test cannot tell the two apart",
+			"the dump is in the directory this test relocated away from",
 		)
-		self._write_dump_at(moved, "20260731_120000-staging-database.sql.gz", age_minutes=4)
 
 		found = _latest_backup_on_disk()
 		self.assertIsNotNone(found, "a dump in the configured backup directory was not seen")

@@ -15,12 +15,13 @@ record of an exercise having been done.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import time
+from datetime import timedelta
 from pathlib import Path
 
 import frappe
 from frappe import _
-from frappe.utils import convert_utc_to_system_timezone, get_datetime, now_datetime
+from frappe.utils import get_datetime, now_datetime
 
 from lms.lms.language_platform.dr_rules import (
 	DR_DRILL_INTERVAL_DAYS,
@@ -65,14 +66,30 @@ def _latest_backup_on_disk():
 	trains them to ignore it.
 	"""
 	try:
-		dumps = list(_backup_directory().glob(BACKUP_DUMP_GLOB))
-		if not dumps:
+		written = []
+		for path in _backup_directory().glob(BACKUP_DUMP_GLOB):
+			stat = path.stat()
+			# A zero-byte dump is a successful `bench backup` and a
+			# worthless artefact — and a failed backup is precisely when
+			# one appears, with a fresh mtime. Measuring the RPO from it
+			# would report the platform safe at the moment its backups
+			# stopped working. `provision_tenant._verify_backup` refuses
+			# these before a purge for the same reason.
+			if stat.st_size > 0:
+				written.append(stat.st_mtime)
+		if not written:
 			return None
-		newest = max(dump.stat().st_mtime for dump in dumps)
-		# mtime is epoch UTC; everything else here is site-local naive.
-		return convert_utc_to_system_timezone(
-			datetime.fromtimestamp(newest, tz=timezone.utc)
-		).replace(tzinfo=None)
+
+		# Age is elapsed seconds, then expressed against the same naive
+		# site-local clock the evaluator reads. Converting the mtime to a
+		# local wall-clock time instead would leave `evaluate_rpo`
+		# subtracting two ambiguous timestamps across a DST transition:
+		# at a fall-back, a 100-minute-old backup reads as 40 minutes old
+		# and hides a breach. Elapsed time has no such ambiguity.
+		# max(..., 0) keeps a clock-skewed future mtime from reading as a
+		# backup taken later than now.
+		elapsed = max(time.time() - max(written), 0)
+		return now_datetime() - timedelta(seconds=elapsed)
 	except Exception:
 		return None
 
