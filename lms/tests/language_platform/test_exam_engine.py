@@ -138,9 +138,19 @@ class TestSelectQuestions(unittest.TestCase):
 		self.assertEqual(len(selected), 4)  # repeats allowed rather than failing
 
 	def test_insufficient_pool_raises(self):
+		"""One row asking for more than exists: say which, and by how much.
+
+		This is the refusal an administrator can act on directly, so the
+		counts in it are part of the behaviour, not decoration.
+		"""
 		segments = [Segment(count=99, skill="Grammar", level="A1")]
-		with self.assertRaises(BlueprintError):
+		with self.assertRaises(BlueprintError) as caught:
 			select_questions(segments, make_pool(), seed="x")
+
+		message = str(caught.exception)
+		self.assertIn("Grammar/A1", message, f"the failing segment is not named: {message}")
+		self.assertIn("99 question(s)", message, f"what was asked for is not stated: {message}")
+		self.assertIn("only 5", message, f"what exists is not stated: {message}")
 
 	def test_duplicate_names_in_pool_rejected(self):
 		pool = make_pool() + [make_pool()[0]]
@@ -200,7 +210,13 @@ class TestSelectQuestions(unittest.TestCase):
 				)
 
 	def test_an_impossible_blueprint_is_still_refused(self):
-		"""Matching must not paper over a pool that genuinely cannot work."""
+		"""Matching must not paper over a pool that genuinely cannot work.
+
+		Both rows match on their own — there is one Grammar/A1 question
+		and each wants one — so the shortage only exists between them.
+		That is the refusal that has to name the row and the shortfall,
+		because a per-segment count cannot explain it.
+		"""
 		segments = [
 			Segment(count=1, skill="Grammar", level="A1"),
 			Segment(count=1, skill="Grammar", level="A1"),
@@ -210,8 +226,12 @@ class TestSelectQuestions(unittest.TestCase):
 			{"name": "GR-A2", "language_skill": "Grammar", "language_level": "A2", "topic": "t"},
 		]
 
-		with self.assertRaises(BlueprintError):
+		with self.assertRaises(BlueprintError) as caught:
 			select_questions(segments, pool, seed="x")
+
+		message = str(caught.exception)
+		self.assertIn("Grammar/A1", message, f"the failing segment is not named: {message}")
+		self.assertIn("short by 1", message, f"the shortfall is not quantified: {message}")
 
 	def test_a_refusal_names_the_segment_that_could_not_be_filled(self):
 		"""An administrator has to be told which row to fix.
@@ -261,15 +281,25 @@ class TestSelectQuestions(unittest.TestCase):
 				self.assertEqual(selected, ["GR-A2", "GR-A1"])
 
 	def test_a_question_is_never_reused_across_overlapping_segments(self):
+		"""§4.7.2: a question never repeats within one attempt.
+
+		Across many seeds, not one: which slots displace which depends on
+		the shuffle, so a single seed exercises a single arrangement.
+		"""
 		segments = [
 			Segment(count=2, skill="Grammar"),
 			Segment(count=2, skill="Grammar", level="A1"),
 			Segment(count=1, level="A1"),
 		]
-		selected = select_questions(segments, make_pool(), seed="reuse")
 
-		self.assertEqual(len(selected), 5)
-		self.assertEqual(len(set(selected)), 5, "a question was placed in two segments")
+		for i in range(200):
+			with self.subTest(seed=i):
+				selected = select_questions(segments, make_pool(), seed=f"reuse-{i}")
+
+				self.assertEqual(len(selected), 5)
+				self.assertEqual(
+					len(set(selected)), 5, "a question was placed in two segments"
+				)
 
 	# Two identical broad segments over four Grammar questions: nothing
 	# here is hard to satisfy, which is the point. The old algorithm
