@@ -84,12 +84,18 @@ const blueprints = createResource({
 	auto: true,
 })
 
-// Every attempt, not only the completed ones: the page needs to count them
-// against `max_attempts` and to spot an attempt still in progress.
+// Every attempt of *this* member, not only the completed ones: the page
+// counts them against `max_attempts` and looks for one still in progress.
+//
+// Scoped to the member explicitly. Staff can read every student's
+// attempts, so without the filter a moderator opening this page counts
+// the whole cohort's and sees their own Start button disappear on a
+// capped test the server would happily let them take.
 const attempts = createResource({
 	url: 'frappe.client.get_list',
 	params: {
 		doctype: 'LMS Placement Attempt',
+		filters: { member: user.data?.name },
 		fields: ['name', 'blueprint', 'status', 'result_level', 'override_level', 'creation'],
 		order_by: 'creation desc',
 		limit_page_length: 0,

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const pushMock = vi.hoisted(() => vi.fn())
 const attemptRows = vi.hoisted(() => ({ value: [] as Record<string, unknown>[] }))
 const blueprintRows = vi.hoisted(() => ({ value: [] as Record<string, unknown>[] }))
+const resourceParams = vi.hoisted(() => ({ value: [] as Record<string, any>[] }))
 
 vi.mock('vue-router', () => ({
 	useRoute: () => ({ params: {}, query: {} }),
@@ -18,15 +19,18 @@ vi.mock('frappe-ui', () => ({
 	Badge: { props: ['label'], template: '<span>{{ label }}</span>' },
 	Breadcrumbs: { template: '<nav />' },
 	Button: { template: '<button @click="$emit(\'click\')"><slot /></button>' },
-	createResource: (options: { params?: { doctype?: string } }) => ({
-		get data() {
-			return options.params?.doctype === 'LMS Placement Attempt'
-				? attemptRows.value
-				: blueprintRows.value
-		},
-		fetched: true,
-		fetch: vi.fn(),
-	}),
+	createResource: (options: { params?: { doctype?: string } }) => {
+		resourceParams.value.push(options.params || {})
+		return {
+			get data() {
+				return options.params?.doctype === 'LMS Placement Attempt'
+					? attemptRows.value
+					: blueprintRows.value
+			},
+			fetched: true,
+			fetch: vi.fn(),
+		}
+	},
 	usePageMeta: vi.fn(),
 }))
 
@@ -58,6 +62,7 @@ const labels = (wrapper: ReturnType<typeof mount>) =>
 describe('PlacementTests', () => {
 	beforeEach(() => {
 		pushMock.mockReset()
+		resourceParams.value = []
 		blueprintRows.value = [
 			{ name: 'PLB-1', title: 'Placement', duration: 30, max_attempts: 3 },
 		]
@@ -115,6 +120,18 @@ describe('PlacementTests', () => {
 
 		await buttons[1].trigger('click') // Retake
 		expect(pushMock.mock.calls.at(-1)?.[0]).not.toHaveProperty('query')
+	})
+
+	it('counts only this member\'s attempts', async () => {
+		// Staff can read every student's attempts. Unscoped, a moderator
+		// opening this page counts the whole cohort against the cap and
+		// loses the Start button on a test the server would allow.
+		await mountPage()
+
+		const attemptQuery = resourceParams.value.find(
+			(params) => params.doctype === 'LMS Placement Attempt'
+		)
+		expect(attemptQuery?.filters).toEqual({ member: 'student@example.com' })
 	})
 
 	it('allows unlimited retakes when the blueprint sets no cap', async () => {
