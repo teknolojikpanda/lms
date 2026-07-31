@@ -40,6 +40,38 @@ def _settings():
 
 
 BACKUP_DUMP_GLOB = "*-database.sql.gz"
+GZIP_MAGIC = b"\x1f\x8b"
+# A 10-byte header and an 8-byte trailer: nothing smaller is a gzip file
+# at all, let alone a database dump.
+GZIP_MINIMUM_BYTES = 18
+
+
+def _is_plausible_dump(path, size):
+	"""Cheap structural checks on a dump. Not a restorability guarantee.
+
+	A zero-byte or stub file is a failed `bench backup` and a worthless
+	artefact — and a failed backup is precisely when one appears, with a
+	fresh mtime. Counting it would report the platform safe at the moment
+	its backups stopped working, and would let a truncated fresh file
+	mask an older dump that is actually restorable.
+	`provision_tenant._verify_backup` refuses these before a purge.
+
+	What this deliberately does not do is prove the dump restores. A gzip
+	truncated mid-stream cannot be told from a complete one without
+	decompressing it, and decompressing a multi-gigabyte dump on every
+	dashboard poll is not an option. Two cases stay undetected: a backup
+	still being written (frappe streams `mysqldump | gzip` straight to the
+	final filename, so it is visible while in flight) and one killed
+	outright — an ordinary failure is cleaned up by frappe itself, but
+	SIGKILL or power loss is not. Both resolve at the next backup.
+
+	Proving a backup restores is what the §8.18 restore test exists for;
+	this measures freshness. See `record_restore_test`.
+	"""
+	if size < GZIP_MINIMUM_BYTES:
+		return False
+	with open(path, "rb") as handle:
+		return handle.read(len(GZIP_MAGIC)) == GZIP_MAGIC
 
 
 def _backup_directory():
@@ -66,35 +98,33 @@ def _latest_backup_on_disk():
 	trains them to ignore it.
 	"""
 	try:
-		mtimes = []
-		for path in _backup_directory().glob(BACKUP_DUMP_GLOB):
+		dumps = sorted(
+			_backup_directory().glob(BACKUP_DUMP_GLOB),
+			key=lambda path: path.stat().st_mtime,
+			reverse=True,
+		)
+		for path in dumps:
 			stat = path.stat()
-			# A zero-byte dump is a successful `bench backup` and a
-			# worthless artefact — and a failed backup is precisely when
-			# one appears, with a fresh mtime. Measuring the RPO from it
-			# would report the platform safe at the moment its backups
-			# stopped working. `provision_tenant._verify_backup` refuses
-			# these before a purge for the same reason.
-			if stat.st_size > 0:
-				mtimes.append(stat.st_mtime)
-		if not mtimes:
-			return None
-
-		# Age is elapsed seconds, then expressed against the same naive
-		# site-local clock the evaluator reads. Converting the mtime to a
-		# local wall-clock time instead would leave `evaluate_rpo`
-		# subtracting two ambiguous timestamps across a DST transition:
-		# at a fall-back, a 100-minute-old backup reads as 40 minutes old
-		# and hides a breach. Elapsed time has no such ambiguity.
-		# max(..., 0) keeps a clock-skewed future mtime from reading as a
-		# backup taken later than now.
-		elapsed = max(time.time() - max(mtimes), 0)
-		return now_datetime() - timedelta(seconds=elapsed)
+			if not _is_plausible_dump(path, stat.st_size):
+				continue
+			# Age is elapsed seconds, then expressed against the same naive
+			# site-local clock the evaluator reads. Converting the mtime to
+			# a local wall-clock time instead would leave `evaluate_rpo`
+			# subtracting two ambiguous timestamps across a DST transition:
+			# at a fall-back, a 100-minute-old backup reads as 40 minutes
+			# old and hides a breach. Elapsed time has no such ambiguity.
+			# max(..., 0) keeps a clock-skewed future mtime from reading as
+			# a backup taken later than now.
+			elapsed = max(time.time() - stat.st_mtime, 0)
+			return now_datetime() - timedelta(seconds=elapsed)
+		return None
 	except Exception:
-		# Reads as unknown, which is the honest answer — but an unreadable
-		# backup directory and an empty one are very different problems,
-		# and only the log can tell them apart. Not an Error Log: this runs
-		# on every dashboard poll.
+		# Broad on purpose: this feeds a dashboard panel and a scheduled
+		# check, and neither should fail because the backup directory is
+		# unreadable. It reads as unknown, which is the honest answer —
+		# but an unreadable directory and an empty one are very different
+		# problems, and only the log can tell them apart. Not an Error
+		# Log: this runs on every dashboard poll.
 		frappe.logger("lms.dr").warning("could not read the backup directory", exc_info=True)
 		return None
 
@@ -110,6 +140,7 @@ def _latest_backup_file_doc():
 		)
 		return get_datetime(row) if row else None
 	except Exception:
+		frappe.logger("lms.dr").warning("could not query File rows for backups", exc_info=True)
 		return None
 
 

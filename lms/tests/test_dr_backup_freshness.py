@@ -6,7 +6,9 @@ that was being backed up correctly, and the RPO panel said "unknown"
 however healthy the platform was — which trains an operator to ignore it.
 """
 
+import gzip
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -16,11 +18,15 @@ from frappe.utils import add_to_date, now_datetime
 
 from lms.lms.language_platform.dr_rules import STATUS_UNKNOWN
 from lms.lms.language_platform.dr import (
+	BACKUP_DUMP_GLOB,
 	_backup_directory,
 	_last_backup_time,
 	_latest_backup_on_disk,
 	get_dr_readiness,
 )
+
+# What `bench backup` writes: a gzip stream, not arbitrary bytes.
+DUMP = gzip.compress(b"-- not a real dump, but a real gzip\n")
 
 
 class TestBackupFreshness(IntegrationTestCase):
@@ -44,16 +50,12 @@ class TestBackupFreshness(IntegrationTestCase):
 		super().tearDown()
 
 	def _remove_directory(self, directory):
-		if not directory.exists():
-			return
-		for leftover in directory.iterdir():
-			leftover.unlink()
-		directory.rmdir()
+		shutil.rmtree(directory, ignore_errors=True)
 
-	def _write_dump(self, name, age_minutes=0, content=b"not a real dump"):
+	def _write_dump(self, name, age_minutes=0, content=DUMP):
 		return self._write_dump_at(self.backups, name, age_minutes, content)
 
-	def _write_dump_at(self, directory, name, age_minutes=0, content=b"not a real dump"):
+	def _write_dump_at(self, directory, name, age_minutes=0, content=DUMP):
 		"""A dump on disk, aged by setting its mtime like a real one."""
 		path = directory / name
 		path.write_bytes(content)
@@ -72,24 +74,47 @@ class TestBackupFreshness(IntegrationTestCase):
 			Path(frappe.get_site_path("private", "backups")).resolve(),
 		)
 
+	def test_the_fixtures_match_the_pattern_the_code_looks_for(self):
+		"""Otherwise changing the glob would quietly stop testing anything."""
+		written = self._write_dump("20260731_120000-staging-database.sql.gz")
+
+		self.assertIn(written, list(self.backups.glob(BACKUP_DUMP_GLOB)))
+
 	def test_an_empty_dump_is_not_a_backup(self):
 		"""A failed backup leaves a zero-byte file with a fresh mtime."""
 		self._write_dump("20260731_120000-staging-database.sql.gz", content=b"")
 
 		self.assertIsNone(_latest_backup_on_disk(), "an empty dump was counted as a backup")
 
-	def test_an_empty_dump_does_not_shadow_a_good_one(self):
+	def test_a_stub_that_is_not_a_gzip_is_not_a_backup(self):
+		"""Something else with the right name is not a dump.
+
+		The header check is cheap; it will not catch a gzip truncated
+		mid-stream, which needs decompression. That is the restore test's
+		job, not the freshness panel's.
+		"""
+		self._write_dump("20260731_120000-staging-database.sql.gz", content=b"an error message\n")
+
+		self.assertIsNone(_latest_backup_on_disk(), "a non-gzip file was counted as a backup")
+
+	def test_a_broken_dump_does_not_shadow_a_good_one(self):
 		"""The failure mode that matters: last night's backup broke.
 
-		A zero-byte dump written minutes ago must not make yesterday's
+		A worthless dump written minutes ago must not make yesterday's
 		real one look current — that reports healthy exactly when the
-		backups have stopped working.
+		backups have stopped working, and hides the older backup that
+		would actually have restored.
 		"""
-		self._write_dump("20260730_090000-staging-database.sql.gz", age_minutes=90)
-		self._write_dump("20260731_120000-staging-database.sql.gz", content=b"")
+		for broken in (b"", b"truncated stub"):
+			with self.subTest(broken=broken):
+				good = self._write_dump("20260730_090000-staging-database.sql.gz", age_minutes=90)
+				self._write_dump("20260731_120000-staging-database.sql.gz", content=broken)
 
-		age = (now_datetime() - _latest_backup_on_disk()).total_seconds() / 60
-		self.assertAlmostEqual(age, 90, delta=2, msg="an empty dump was taken as the backup")
+				age = (now_datetime() - _latest_backup_on_disk()).total_seconds() / 60
+				self.assertAlmostEqual(age, 90, delta=2, msg="a broken dump was taken as the backup")
+
+				for path in (good, self.backups / "20260731_120000-staging-database.sql.gz"):
+					path.unlink()
 
 	def test_a_dump_on_disk_is_found(self):
 		"""The defect: only File rows were consulted, so this was missed."""
