@@ -11,15 +11,49 @@ Pure tests — no Frappe site required:
 	python -m unittest lms.tests.language_platform.test_exam_engine
 """
 
+import random
+import sys
 import unittest
 
 from lms.lms.language_platform.exam_engine import (
 	BlueprintError,
 	Segment,
+	_assign_slots,
 	derive_seed,
 	map_score_to_level,
 	select_questions,
 )
+
+
+def legacy_select(segments, pool, seed, seen=frozenset()):
+	"""The pre-matching algorithm, as an independent oracle.
+
+	Reimplemented here rather than imported, so this keeps testing what
+	"fill the segments in configured order" produced even if the
+	production code stops containing that shape. Returns ``None`` where
+	the old code raised.
+	"""
+	rng = random.Random(seed)
+	ordered = sorted(pool, key=lambda q: str(q["name"]))
+	selected: list[str] = []
+	chosen: set[str] = set()
+
+	for segment in segments:
+		if segment.count <= 0:
+			continue
+		candidates = [q for q in ordered if segment.matches(q)]
+		available = [q for q in candidates if str(q["name"]) not in chosen]
+		if len(available) < segment.count:
+			return None
+		unseen = [q for q in available if str(q["name"]) not in seen]
+		exposed = [q for q in available if str(q["name"]) in seen]
+		rng.shuffle(unseen)
+		rng.shuffle(exposed)
+		for q in (unseen + exposed)[: segment.count]:
+			selected.append(str(q["name"]))
+			chosen.add(str(q["name"]))
+
+	return selected
 
 
 def make_pool():
@@ -236,6 +270,128 @@ class TestSelectQuestions(unittest.TestCase):
 
 		self.assertEqual(len(selected), 5)
 		self.assertEqual(len(set(selected)), 5, "a question was placed in two segments")
+
+	# Two identical broad segments over four Grammar questions: nothing
+	# here is hard to satisfy, which is the point. The old algorithm
+	# always managed it, so every one of these seeds has a recorded answer
+	# that has to keep re-deriving.
+	SATISFIABLE_SEGMENTS = [
+		Segment(count=1, skill="Grammar"),
+		Segment(count=1, skill="Grammar"),
+	]
+	FOUR_GRAMMAR = [
+		{"name": "G-A1", "language_skill": "Grammar", "language_level": "A1", "topic": "t"},
+		{"name": "G-A2", "language_skill": "Grammar", "language_level": "A2", "topic": "t"},
+		{"name": "G-B1", "language_skill": "Grammar", "language_level": "B1", "topic": "t"},
+		{"name": "G-B2", "language_skill": "Grammar", "language_level": "B2", "topic": "t"},
+	]
+
+	def test_a_seed_the_old_order_could_satisfy_still_re_derives(self):
+		"""§4.7.2 persists the seed so an attempt can be re-derived for audit.
+
+		Matching shuffles each segment's whole match list; filling in
+		order shuffled only what earlier segments had left. Different
+		lengths mean different rng draws, so from the first overlapping
+		segment onwards the streams diverge and the same seed produces a
+		different question set — silently, for attempts already sat and
+		recorded. An audit trail that no longer reproduces has stopped
+		meaning anything.
+		"""
+		preserved = 0
+		for i in range(300):
+			seed = f"audit-{i}"
+			legacy = legacy_select(self.SATISFIABLE_SEGMENTS, self.FOUR_GRAMMAR, seed)
+			if legacy is None:
+				continue
+			preserved += 1
+			with self.subTest(seed=seed):
+				self.assertEqual(
+					select_questions(self.SATISFIABLE_SEGMENTS, self.FOUR_GRAMMAR, seed),
+					legacy,
+					"an attempt recorded under this seed no longer re-derives",
+				)
+		self.assertGreater(preserved, 0, "no seed exercised the preserved path")
+
+	def test_exposure_control_re_derives_too(self):
+		"""Retakes are the case where the two shuffles differ most."""
+		seen = {"G-B1", "G-B2"}
+		preserved = 0
+		for i in range(200):
+			seed = f"retake-{i}"
+			legacy = legacy_select(
+				self.SATISFIABLE_SEGMENTS, self.FOUR_GRAMMAR, seed, seen=seen
+			)
+			if legacy is None:
+				continue
+			preserved += 1
+			with self.subTest(seed=seed):
+				self.assertEqual(
+					select_questions(
+						self.SATISFIABLE_SEGMENTS, self.FOUR_GRAMMAR, seed, seen=seen
+					),
+					legacy,
+				)
+		self.assertGreater(preserved, 0, "no seed exercised the preserved path")
+
+	def test_extras_re_derive_as_well(self):
+		"""Pass 2 draws from the same rng, so it moves if pass 1 does."""
+		segments = [Segment(count=1, skill="Grammar")]
+		for i in range(100):
+			seed = f"extra-{i}"
+			legacy = legacy_select(segments, self.FOUR_GRAMMAR, seed)
+			self.assertIsNotNone(legacy)
+			with self.subTest(seed=seed):
+				selected = select_questions(
+					segments, self.FOUR_GRAMMAR, seed, extra_count=2
+				)
+				self.assertEqual(selected[:1], legacy, "the blueprint pick moved")
+				self.assertEqual(len(set(selected)), 3)
+
+	def test_the_fallback_is_deterministic_in_the_seed(self):
+		"""When the old order fails, the answer must still be reproducible.
+
+		The fallback runs on a fresh rng rather than whatever the failed
+		attempt left behind, so it depends on the seed and not on how far
+		the first pass got before giving up.
+		"""
+		segments = [
+			Segment(count=1, skill="Grammar"),
+			Segment(count=1, skill="Grammar", level="A1"),
+		]
+		pool = [
+			{"name": "G-A1", "language_skill": "Grammar", "language_level": "A1", "topic": "t"},
+			{"name": "G-A2", "language_skill": "Grammar", "language_level": "A2", "topic": "t"},
+		]
+		fell_back = 0
+		for i in range(200):
+			seed = f"fallback-{i}"
+			if legacy_select(segments, pool, seed) is not None:
+				continue
+			fell_back += 1
+			with self.subTest(seed=seed):
+				first = select_questions(segments, pool, seed)
+				self.assertEqual(first, select_questions(segments, pool, seed))
+		self.assertGreater(fell_back, 0, "no seed exercised the fallback")
+
+	def test_the_matcher_survives_a_chain_longer_than_the_recursion_limit(self):
+		"""A blueprint is operator data; it must not be able to blow the stack.
+
+		Each slot here accepts its own question and the next one, so the
+		greedy pass fills them in order. The final slot then wants the
+		first question, and satisfying it means displacing every slot in
+		turn — one augmenting chain as long as the blueprint.
+		"""
+		depth = sys.getrecursionlimit() + 100
+		candidates = [[f"q{i}", f"q{i + 1}"] for i in range(depth)]
+		candidates.append(["q0"])
+
+		assignment: dict[int, str] = {}
+		_assign_slots(candidates, assignment, {})
+
+		self.assertEqual(len(assignment), depth + 1, "the chain was not followed to the end")
+		self.assertEqual(
+			len(set(assignment.values())), depth + 1, "a question was placed twice"
+		)
 
 	def test_extra_count_distributed_without_duplicates(self):
 		selected = select_questions(SEGMENTS, make_pool(), seed="x", extra_count=5)
