@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -254,3 +256,93 @@ class TestEnvelopeErrors(IntegrationTestCase):
 			frappe.db.exists("LMS Speaking Prompt", {"title": title}),
 			"a write made before the failure survived",
 		)
+
+
+class TestEnvelopeRateLimit(IntegrationTestCase):
+	"""A throttled caller must be told it is throttled.
+
+	`RateLimitExceededError` subclasses `ValidationError`, so it landed in
+	the validation branch: a 417 carrying "Too Many Requests" as though
+	the payload were at fault. A client could not tell throttling from a
+	real validation failure, and lost the 429 that says back off and retry
+	rather than correct and resubmit.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")
+		frappe.local.response = frappe._dict()
+
+	def test_a_rate_limited_call_answers_429(self):
+		@envelope
+		def throttled():
+			raise frappe.RateLimitExceededError("Too Many Requests")
+
+		result = throttled()
+
+		self.assertFalse(result["ok"])
+		self.assertEqual(result["error"]["code"], "RATE_LIMITED")
+		self.assertEqual(frappe.local.response["http_status_code"], 429)
+
+	def test_it_is_not_reported_as_a_validation_failure(self):
+		"""The distinction the client acts on."""
+
+		@envelope
+		def throttled():
+			raise frappe.RateLimitExceededError("Too Many Requests")
+
+		result = throttled()
+
+		self.assertNotEqual(result["error"]["code"], "VALIDATION_ERROR")
+		self.assertNotEqual(frappe.local.response["http_status_code"], 417)
+
+	def test_an_ordinary_validation_error_is_unaffected(self):
+		"""The branch above it must not swallow the common case."""
+
+		@envelope
+		def invalid():
+			frappe.throw("Level must be one of A1..C2.")
+
+		result = invalid()
+
+		self.assertEqual(result["error"]["code"], "VALIDATION_ERROR")
+		self.assertEqual(frappe.local.response["http_status_code"], 417)
+
+
+class TestEnvelopeLoggingIsBestEffort(IntegrationTestCase):
+	"""Reporting a failure must not become a second failure.
+
+	`log_error` writes through the same database, so the outage most
+	likely to reach the catch-all is exactly the one that makes the
+	logging raise too — and that exception escaped the wrapper, masking
+	the original cause and returning the bare Frappe error this branch
+	exists to prevent.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")
+		frappe.local.response = frappe._dict()
+
+	def test_a_failing_log_still_yields_a_500_envelope(self):
+		@envelope
+		def broken():
+			raise KeyError("language_level")
+
+		with patch("frappe.log_error", side_effect=Exception("database has gone away")):
+			result = broken()
+
+		self.assertFalse(result["ok"])
+		self.assertEqual(result["error"]["code"], "INTERNAL_ERROR")
+		self.assertEqual(frappe.local.response["http_status_code"], 500)
+		self.assertIn("correlationId", result["meta"])
+
+	def test_the_original_cause_is_not_replaced_by_the_logging_failure(self):
+		@envelope
+		def broken():
+			raise KeyError("language_level")
+
+		with patch("frappe.log_error", side_effect=Exception("database has gone away")):
+			result = broken()
+
+		self.assertNotIn("gone away", str(result["error"]["message"]))

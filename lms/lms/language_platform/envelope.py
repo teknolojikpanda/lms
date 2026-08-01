@@ -82,6 +82,26 @@ def envelope(fn):
 		# first and says so — see the timeout finalisation in
 		# lms_placement_attempt. Committed work is not ours to undo, which
 		# is what makes that an opt-in rather than an exception here.
+		# Before ValidationError, which this subclasses. Left to that branch a
+		# throttled caller got a 417 VALIDATION_ERROR carrying "Too Many
+		# Requests" as though the payload were at fault — indistinguishable
+		# from a real validation failure, and stripped of the 429 that tells
+		# a client to back off and retry rather than correct and resubmit.
+		# `rate_limit` raises before the wrapped body runs, so nothing has
+		# been written; the rollback is for consistency, not repair.
+		except frappe.RateLimitExceededError as e:
+			_discard_partial_work()
+			frappe.clear_messages()
+			frappe.local.response["http_status_code"] = 429
+			return {
+				"ok": False,
+				"error": {
+					"code": "RATE_LIMITED",
+					"message": str(e) or "Too many requests. Please retry later.",
+					"details": None,
+				},
+				"meta": {"correlationId": correlation_id},
+			}
 		except frappe.exceptions.ValidationError as e:
 			_discard_partial_work()
 			frappe.clear_messages()
@@ -113,11 +133,20 @@ def envelope(fn):
 			# The correlation id is the whole point of logging here. The
 			# client is told nothing about the cause deliberately, so the
 			# id is the only thread tying their report to this traceback.
-			frappe.log_error(
-				title=f"Language platform API error [{correlation_id}]",
-				message=f"correlationId: {correlation_id}\nendpoint: {fn.__module__}.{fn.__name__}\n\n"
-				+ frappe.get_traceback(),
-			)
+			# Best-effort. log_error writes an Error Log *through the database*,
+			# so the outage most likely to land here is exactly the one that
+			# made this call fail — and an exception raised while reporting an
+			# exception escapes the wrapper, masks the original cause, and
+			# returns the bare Frappe error this branch exists to prevent.
+			# Losing the log is bad; losing the envelope with it is worse.
+			try:
+				frappe.log_error(
+					title=f"Language platform API error [{correlation_id}]",
+					message=f"correlationId: {correlation_id}\nendpoint: {fn.__module__}.{fn.__name__}\n\n"
+					+ frappe.get_traceback(),
+				)
+			except Exception:
+				pass
 			# log_error does not commit, and a read-only request would be
 			# rolled back on the way out — taking the log with it. Commit
 			# now, which is safe because the rollback above left nothing
