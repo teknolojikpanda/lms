@@ -45,38 +45,64 @@ export class Upload {
 		return this.wrapper
 	}
 
+	/**
+	 * Mount a block component, replacing whatever this block had before.
+	 *
+	 * Every branch goes through here so `this.app` always holds the app
+	 * actually mounted. Only the PDF branch used to track it, so
+	 * `destroy()` unmounted nothing for the others — and `onBeforeUnmount`
+	 * never ran. A watermarked VideoBlock rotates its mark on an interval
+	 * cleared in that hook, so every such video visited or re-rendered
+	 * left a live timer and a reactive component behind for the life of
+	 * the page. The uploader leaked the same way each time a file replaced
+	 * it.
+	 */
+	mountApp(component, props, { translate = false } = {}) {
+		this.unmountApp()
+		const app = createApp(component, props)
+		if (translate) app.use(translationPlugin)
+		app.config.globalProperties.$dialog = createDialog
+		app.mount(this.wrapper)
+		this.app = app
+		return app
+	}
+
+	unmountApp() {
+		if (!this.app) return
+		this.app.unmount()
+		this.app = null
+	}
+
 	renderFile(file) {
 		if (this.isVideo(file.file_type)) {
-			const app = createApp(VideoBlock, {
-				file: file.file_url,
-				readOnly: this.readOnly,
-				quizzes: file.quizzes || [],
-				saveQuizzes: (quizzes) => {
-					if (this.readOnly) return
-					this.data.quizzes = quizzes
+			this.mountApp(
+				VideoBlock,
+				{
+					file: file.file_url,
+					readOnly: this.readOnly,
+					quizzes: file.quizzes || [],
+					saveQuizzes: (quizzes) => {
+						if (this.readOnly) return
+						this.data.quizzes = quizzes
+					},
 				},
-			})
-			app.use(translationPlugin)
-			app.config.globalProperties.$dialog = createDialog
-			app.mount(this.wrapper)
+				{ translate: true }
+			)
 			return
 		} else if (this.isAudio(file.file_type)) {
-			const app = createApp(AudioBlock, {
-				file: file.file_url,
-			})
-			app.mount(this.wrapper)
+			this.mountApp(AudioBlock, { file: file.file_url })
 			return
 		} else if (file.file_type == 'PDF') {
 			// iOS Safari (all WebKit browsers) refuses to scroll a PDF in an
 			// <iframe>, so render it inline via pdf.js. mount()/unmount() is tracked
 			// so destroy() can tear the pdf.js worker + render tasks down.
-			this.app = createApp(PdfBlock, {
-				file: file.file_url,
-			})
-			this.app.use(translationPlugin)
-			this.app.mount(this.wrapper)
+			this.mountApp(PdfBlock, { file: file.file_url }, { translate: true })
 			return
 		} else {
+			// An image replaces the block's markup outright, so anything
+			// mounted here has to come down first or it keeps running with
+			// its DOM torn out from under it.
+			this.unmountApp()
 			this.wrapper.innerHTML = `<img class="mb-4" src=${encodeURI(
 				file.file_url
 			)} width='100%'>`
@@ -85,16 +111,22 @@ export class Upload {
 	}
 
 	renderFileUploader() {
-		const app = createApp(UploadPlugin, {
-			uploadContext: this.config,
-			onFileUploaded: (file) => {
-				this.data.file_url = file.file_url
-				this.data.file_type = file.file_type
-				this.renderFile(file)
+		this.mountApp(
+			UploadPlugin,
+			{
+				uploadContext: this.config,
+				onFileUploaded: (file) => {
+					this.data.file_url = file.file_url
+					this.data.file_type = file.file_type
+					// The uploader is unmounted as part of rendering the file,
+					// so hand back to the caller first: unmounting an app from
+					// inside its own event handler tears down the component
+					// that is still running.
+					queueMicrotask(() => this.renderFile(file))
+				},
 			},
-		})
-		app.use(translationPlugin)
-		app.mount(this.wrapper)
+			{ translate: true }
+		)
 	}
 
 	validate(savedData) {
@@ -113,13 +145,11 @@ export class Upload {
 	}
 
 	// EditorJS calls destroy() when a block is removed or the editor is torn down.
-	// Unmounting the PdfBlock app fires its onBeforeUnmount, which cancels render
-	// tasks, destroys the document, and releases the shared pdf.js worker.
+	// Unmounting fires the block's onBeforeUnmount: PdfBlock cancels render tasks,
+	// destroys the document and releases the shared pdf.js worker; VideoBlock
+	// clears its watermark rotation interval.
 	destroy() {
-		if (this.app) {
-			this.app.unmount()
-			this.app = null
-		}
+		this.unmountApp()
 	}
 
 	isVideo(type) {
