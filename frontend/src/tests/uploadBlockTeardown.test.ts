@@ -81,6 +81,21 @@ describe('Upload block teardown', () => {
 		expect(mocks.unmounted).toContain('video')
 	})
 
+	it('does not remount after destroy()', async () => {
+		// The uploader hands back through a microtask so it is not unmounted
+		// mid-handler — but EditorJS may have removed the block by the time
+		// that runs, and mounting then revives a block the editor has torn
+		// down, into a wrapper no longer in the document.
+		const block = makeBlock({})
+
+		block.destroy()
+		block.renderFile({ file_url: '/files/a.mp4', file_type: 'mp4' })
+		await Promise.resolve()
+
+		expect(block.app).toBeNull()
+		expect(block.wrapper.querySelector('[data-block="video"]')).toBeNull()
+	})
+
 	it('destroy() is safe to call twice', () => {
 		const block = makeBlock({ file_url: '/files/a.mp4', file_type: 'mp4' })
 

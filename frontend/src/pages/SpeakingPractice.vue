@@ -330,11 +330,7 @@ const startRecording = async () => {
 	recordStartedAt = Date.now()
 	recordInterval = setInterval(() => {
 		// Elapsed wall time, not one tick per callback — see recordingClock.
-		recordSeconds.value = recordedSeconds(
-			recordStartedAt,
-			Date.now(),
-			maxDuration.value
-		)
+		recordSeconds.value = recordedSeconds(recordStartedAt, Date.now())
 		// §8.13 MUST: hard stop at the configured limit
 		if (isOverRecordingLimit(recordStartedAt, Date.now(), maxDuration.value)) {
 			stopRecording()
@@ -347,11 +343,7 @@ const stopRecording = () => {
 	// the elapsed time here too rather than trusting the last tick — this
 	// is the value the server's quota check receives.
 	if (recordStartedAt) {
-		recordSeconds.value = recordedSeconds(
-			recordStartedAt,
-			Date.now(),
-			maxDuration.value
-		)
+		recordSeconds.value = recordedSeconds(recordStartedAt, Date.now())
 		recordStartedAt = null
 	}
 	if (recordInterval) clearInterval(recordInterval)

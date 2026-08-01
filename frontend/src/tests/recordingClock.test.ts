@@ -5,7 +5,7 @@ const START = 1_000_000
 
 describe('recordedSeconds', () => {
 	it('measures elapsed time', () => {
-		expect(recordedSeconds(START, START + 30_000, 120)).toBe(30)
+		expect(recordedSeconds(START, START + 30_000)).toBe(30)
 	})
 
 	it('is unaffected by how often the timer got to run', () => {
@@ -15,23 +15,29 @@ describe('recordedSeconds', () => {
 		// keeps recording, so four minutes of audio read as a handful of
 		// seconds — and that undercount was what the server received for
 		// its duration check and daily quota.
-		expect(recordedSeconds(START, START + 240_000, 600)).toBe(240)
+		expect(recordedSeconds(START, START + 240_000)).toBe(240)
 	})
 
-	it('never reports more than the limit', () => {
-		expect(recordedSeconds(START, START + 240_000, 120)).toBe(120)
+	it('reports an overrun truthfully rather than clamping it', () => {
+		// Clamping looked tidy and was the more dangerous option. When a
+		// throttled callback lets a recording overrun, MediaRecorder has
+		// really captured the longer audio; declaring exactly the limit
+		// would hand the server a duration its own check accepts, so a
+		// 240-second blob would be admitted as 120 and charged to the
+		// daily quota as if it were within bounds.
+		expect(recordedSeconds(START, START + 240_000)).toBe(240)
 	})
 
 	it('reports nothing before a recording starts', () => {
-		expect(recordedSeconds(null, START + 5_000, 120)).toBe(0)
+		expect(recordedSeconds(null, START + 5_000)).toBe(0)
 	})
 
 	it('does not go negative if the clock steps backwards', () => {
-		expect(recordedSeconds(START, START - 5_000, 120)).toBe(0)
+		expect(recordedSeconds(START, START - 5_000)).toBe(0)
 	})
 
-	it('is uncapped when no limit is configured', () => {
-		expect(recordedSeconds(START, START + 300_000, 0)).toBe(300)
+	it('takes no limit at all — the limit belongs to the stop, not the clock', () => {
+		expect(recordedSeconds(START, START + 300_000)).toBe(300)
 	})
 })
 

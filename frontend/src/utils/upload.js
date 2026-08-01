@@ -12,6 +12,7 @@ export class Upload {
 		this.data = data
 		this.readOnly = readOnly
 		this.config = config || {}
+		this.destroyed = false
 	}
 
 	static get toolbox() {
@@ -58,6 +59,11 @@ export class Upload {
 	 * it.
 	 */
 	mountApp(component, props, { translate = false } = {}) {
+		// Deferred work can outlive the block: the uploader hands back
+		// through a microtask, and EditorJS may have removed the block by
+		// the time it runs. Mounting then would revive a block the editor
+		// has already torn down, into a wrapper no longer in the document.
+		if (this.destroyed) return null
 		this.unmountApp()
 		const app = createApp(component, props)
 		if (translate) app.use(translationPlugin)
@@ -74,6 +80,7 @@ export class Upload {
 	}
 
 	renderFile(file) {
+		if (this.destroyed) return
 		if (this.isVideo(file.file_type)) {
 			this.mountApp(
 				VideoBlock,
@@ -149,6 +156,9 @@ export class Upload {
 	// destroys the document and releases the shared pdf.js worker; VideoBlock
 	// clears its watermark rotation interval.
 	destroy() {
+		// Latched before unmounting, so anything already queued finds the
+		// block gone rather than racing the teardown.
+		this.destroyed = true
 		this.unmountApp()
 	}
 

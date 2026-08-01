@@ -346,6 +346,16 @@ const watermarkStyle = computed(() => {
 const checkOverlays = (timeSeconds) => {
 	if (showOverlayPopup.value || showQuiz.value) return
 
+	// A floating note holds the queue too. One seek can cross several
+	// overlays, and the clock only advances as far as the one just shown —
+	// so without this the very next timeupdate picks up the following
+	// overlay, replaces the note and clears its timeout. The note would
+	// flash for a few hundred milliseconds, or be wiped instantly by a
+	// question opening, while still being marked shown for good. Holding
+	// here leaves `lastCheckedTime` untouched, so whatever else the jump
+	// crossed is still due once the note has had its eight seconds.
+	if (floatingNote.value) return
+
 	// An overlay is due once playback has reached its timestamp, not only
 	// while it sits inside a window just after it.
 	//
