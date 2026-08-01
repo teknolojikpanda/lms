@@ -100,6 +100,17 @@ html[data-font-step='6'] body {
 html[data-contrast='high'] {
 	--lms-focus-color: #0b3d91;
 
+	/*
+	 * A complete palette, not a set of adjustments. The dark theme
+	 * (`data-theme='dark'`, set by UserDropdown) is still applied
+	 * underneath, so anything left unset keeps its dark value — and near
+	 * black ink on a near black page is less readable than the default
+	 * this mode exists to repair. `color-scheme` carries the same
+	 * instruction to scrollbars, form controls and the like, which no
+	 * variable of ours reaches.
+	 */
+	color-scheme: light;
+
 	/* frappe-ui theme variables, overridden wholesale. */
 	--ink-gray-9: #111111;
 	--ink-gray-8: #111111;
@@ -108,13 +119,49 @@ html[data-contrast='high'] {
 	--ink-gray-5: #3d3d3d;
 	--ink-gray-4: #3d3d3d;
 
+	/*
+	 * Every surface a page can be painted with. HIGH_CONTRAST_PALETTE in
+	 * accessibility_rules.py declares background and surface as #ffffff;
+	 * this is where that promise is actually kept.
+	 */
+	--surface-base: #ffffff;
 	--surface-white: #ffffff;
+	--surface-menu-bar: #ffffff;
+	--surface-sidebar: #ffffff;
+	--surface-modal: #ffffff;
+	--surface-cards: #ffffff;
+	--surface-elevation-1: #ffffff;
+	--surface-elevation-2: #ffffff;
+	--surface-elevation-3: #ffffff;
 	--surface-gray-1: #ffffff;
 	--surface-gray-2: #f2f2f2;
+	--surface-gray-3: #e6e6e6;
+	--surface-gray-4: #d9d9d9;
+	--surface-gray-5: #cccccc;
+
+	/*
+	 * The inverted surfaces stay dark on purpose: they carry light text
+	 * (tooltips, badges). Whitening them would destroy the contrast this
+	 * mode is for, in the opposite direction.
+	 */
+	--surface-gray-7: #3d3d3d;
+	--surface-gray-8: #1f1f1f;
+	--surface-gray-10: #111111;
 
 	--outline-gray-1: #111111;
 	--outline-gray-2: #111111;
 	--outline-gray-3: #111111;
+}
+
+/*
+ * A backstop for anything painted by a rule rather than a token — a
+ * hardcoded background somewhere in the tree, or a frappe-ui version that
+ * renames a variable. The page itself must never be dark in this mode.
+ */
+html[data-contrast='high'],
+html[data-contrast='high'] body {
+	background-color: #ffffff;
+	color: #111111;
 }
 
 /*
@@ -188,9 +235,67 @@ html[data-whiteboard='true'] .opacity-0 {
 	opacity: 1 !important;
 }
 
-/* (c) Minimal chrome: the class is looking at content, not navigation. */
+/*
+ * `visibility` and `opacity` are only two of the three ways this codebase
+ * hides a hover control. The commonest is `display` — `hidden
+ * group-hover:block` on ChapterRow's edit and delete actions,
+ * `hidden group-hover:inline-block` on ProfileEvaluator's — and an
+ * element left at `display: none` is not merely hard to reach on a touch
+ * screen, it is absent. Revealing only the first two left the actions a
+ * teacher most needs at the board unreachable.
+ */
+html[data-whiteboard='true'] .group-hover\:block,
+html[data-whiteboard='true'] .hidden.group-hover\:block {
+	display: block !important;
+}
+
+html[data-whiteboard='true'] .group-hover\:inline-block,
+html[data-whiteboard='true'] .hidden.group-hover\:inline-block {
+	display: inline-block !important;
+}
+
+html[data-whiteboard='true'] .group-hover\:inline,
+html[data-whiteboard='true'] .hidden.group-hover\:inline {
+	display: inline !important;
+}
+
+html[data-whiteboard='true'] .group-hover\:flex,
+html[data-whiteboard='true'] .hidden.group-hover\:flex {
+	display: flex !important;
+}
+
+/* (c) Minimal chrome: the class is looking at content, not navigation.
+ *     Carried by the sidebar in DesktopLayout and the fixed navigation in
+ *     MobileLayout. The marker existed here before anything wore it, so
+ *     the mode changed nothing it claimed to. */
 html[data-whiteboard='true'] [data-whiteboard-hide] {
 	display: none !important;
+}
+
+/*
+ * The way back out. Hiding the navigation also hides the route to
+ * /accessibility, where the toggle lives, so without this a teacher at
+ * the board could only leave the mode by typing a URL. Shown only in
+ * whiteboard mode, and sized for the same finger as everything else.
+ */
+.lms-whiteboard-exit {
+	display: none;
+}
+
+html[data-whiteboard='true'] .lms-whiteboard-exit {
+	position: fixed;
+	inset-block-end: 1rem;
+	inset-inline-end: 1rem;
+	z-index: 200;
+	display: inline-block;
+	min-height: 56px;
+	padding: 0 1.25rem;
+	border: 2px solid #111111;
+	border-radius: 8px;
+	background: #ffffff;
+	color: #111111;
+	font-size: 1.0625em;
+	font-weight: 600;
 }
 
 html[data-whiteboard='true'] {

@@ -89,33 +89,62 @@ export async function loadAccessibility() {
 	}
 }
 
+function snapshot() {
+	return {
+		font_step: state.font_step,
+		contrast_mode: state.contrast_mode,
+		whiteboard_mode: state.whiteboard_mode,
+		reduce_motion: state.reduce_motion,
+	}
+}
+
+/*
+ * Saves run one at a time, and only the newest pending state is ever
+ * sent. Without this, dragging the font-size control fires a save per
+ * step with no ordering guard: whichever request the server happens to
+ * finish last wins, so an earlier size can overwrite the one the user
+ * actually chose. Locally everything still looks right, which is what
+ * makes it hard to notice — the stale value only appears on the next
+ * reload, or on another device.
+ *
+ * Coalescing rather than queuing every change: the intermediate states
+ * of a drag are not worth a round trip each, and only the final one is
+ * meaningful.
+ */
+let inFlight = null
+let pending = null
+
+async function flush() {
+	while (pending) {
+		const payload = pending
+		pending = null
+		try {
+			await saveAccessibilityPreferences(payload)
+		} catch {
+			// Kept locally; the next successful save reconciles.
+		}
+	}
+	inFlight = null
+}
+
 /**
  * Update one or more preferences.
  *
  * Applies locally first, then persists: the control must respond
  * instantly, and a failed save should not mean the setting appears not to
  * work.
+ *
+ * Resolves when the write this call scheduled has been dealt with — sent,
+ * or superseded by a newer one.
  */
 export async function updateAccessibility(changes) {
 	Object.assign(state, changes)
 	apply(state)
-	writeLocal({
-		font_step: state.font_step,
-		contrast_mode: state.contrast_mode,
-		whiteboard_mode: state.whiteboard_mode,
-		reduce_motion: state.reduce_motion,
-	})
+	writeLocal(snapshot())
 
-	try {
-		await saveAccessibilityPreferences({
-			font_step: state.font_step,
-			contrast_mode: state.contrast_mode,
-			whiteboard_mode: state.whiteboard_mode,
-			reduce_motion: state.reduce_motion,
-		})
-	} catch {
-		// Kept locally; the next successful save reconciles.
-	}
+	pending = snapshot()
+	if (!inFlight) inFlight = flush()
+	return inFlight
 }
 
 export function useAccessibility() {

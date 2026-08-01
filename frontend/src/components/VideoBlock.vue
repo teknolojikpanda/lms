@@ -206,6 +206,7 @@ import QuizInVideo from '@/components/Modals/QuizInVideo.vue'
 import OverlayPopup from '@/components/Modals/OverlayPopup.vue'
 import { overlayContext } from '@/stores/overlayContext'
 import { getLessonOverlays, getWatermark } from '@/utils/langApi'
+import { findDueOverlay } from '@/utils/videoOverlays'
 
 const videoRef = ref(null)
 const videoContainer = ref(null)
@@ -232,6 +233,9 @@ const currentOverlay = ref(null)
 const showOverlayPopup = ref(false)
 const floatingNote = ref(null)
 const shownOverlays = new Set()
+// Previous playback position, so an overlay counts as due when playback
+// crosses its timestamp rather than only when it lands just after it.
+let lastCheckedTime = null
 let wasPlayingBeforeOverlay = false
 let floatingNoteTimeout = null
 
@@ -341,13 +345,46 @@ const watermarkStyle = computed(() => {
 
 const checkOverlays = (timeSeconds) => {
 	if (showOverlayPopup.value || showQuiz.value) return
-	const due = overlays.value.find(
-		(overlay) =>
-			!shownOverlays.has(overlay.name) &&
-			timeSeconds >= overlay.timestamp_ms / 1000 &&
-			timeSeconds <= overlay.timestamp_ms / 1000 + 1.5
+
+	// A floating note holds the queue too. One seek can cross several
+	// overlays, and the clock only advances as far as the one just shown —
+	// so without this the very next timeupdate picks up the following
+	// overlay, replaces the note and clears its timeout. The note would
+	// flash for a few hundred milliseconds, or be wiped instantly by a
+	// question opening, while still being marked shown for good. Holding
+	// here leaves `lastCheckedTime` untouched, so whatever else the jump
+	// crossed is still due once the note has had its eight seconds.
+	if (floatingNote.value) return
+
+	// An overlay is due once playback has reached its timestamp, not only
+	// while it sits inside a window just after it.
+	//
+	// The window was 1.5s wide, and nothing guarantees a playback position
+	// lands in it: `timeupdate` fires every 200-250ms at normal speed but
+	// far more coarsely under load or at higher rates, and a seek moves
+	// the position arbitrarily far in one step. Jumping from before a
+	// timestamped question to more than 1.5s past it skipped it
+	// permanently — so a student could seek over every question in a
+	// lesson, and the pausing notes with them.
+	//
+	// `lastCheckedTime` keeps the previous position so a jump is treated
+	// as crossing everything between the two. Seeking *backwards* cannot
+	// re-fire what was already answered — `shownOverlays` holds.
+	const previous = lastCheckedTime
+	const due = findDueOverlay(overlays.value, previous, timeSeconds, (overlay) =>
+		shownOverlays.has(overlay.name)
 	)
-	if (!due) return
+
+	if (!due) {
+		lastCheckedTime = timeSeconds
+		return
+	}
+
+	// Advance the clock only as far as the overlay being shown, not to the
+	// current position: one jump can cross several, and the rest must stay
+	// ahead of `previous` so they come up in order on the following checks
+	// rather than being swallowed by the same seek.
+	lastCheckedTime = Math.max(previous ?? 0, due.timestamp_ms / 1000)
 
 	shownOverlays.add(due.name)
 
