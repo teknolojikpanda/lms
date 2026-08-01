@@ -68,7 +68,13 @@ PERSONAL_DATA_SOURCES = [
 	{
 		"doctype": "LMS Speaking Submission",
 		"owner_field": "member",
-		"scrub": {"transcript": None, "audio_file": None},
+		# `audio_file` is mandatory, so it takes a marker rather than a
+		# NULL: db.set_value bypasses validation during erasure, so the
+		# NULL was written happily and only failed the next time anything
+		# loaded and saved the row. The recording it pointed at is deleted
+		# by the audio-retention sweep; this records that there was one and
+		# that it is gone, which a NULL cannot say.
+		"scrub": {"transcript": None, "audio_file": ERASED_MARKER},
 	},
 	# A forensic trace exists to identify a viewer, so after erasure it
 	# must no longer be able to. The mapping row is kept for the leak
@@ -95,10 +101,28 @@ PERSONAL_DATA_SOURCES = [
 	# deleting one raises a link-exists error and fails the whole erasure
 	# request. Emptying the credentials removes the personal content and
 	# leaves the batch's reference intact.
+	#
+	# `account_name` is mandatory *and* the autoname field, so it takes a
+	# unique marker rather than a NULL — see the LMS Zoom Settings entry
+	# below, which documents the same hazard: db.set_value bypasses
+	# validation during erasure, so a NULL is written happily and then
+	# fails the next time anything loads and saves the row.
+	#
+	# KNOWN GAP: `google_calendar` is likewise mandatory and is still
+	# nulled here, so a scrubbed row remains unsavable. It is a Link, so a
+	# marker would only be a dangling reference — the fix is either to
+	# leave the link and bring Google Calendar into this list, or to
+	# detach the referring Batch/Live Class fields and purge the row
+	# outright. That is a retention decision rather than an engineering
+	# one and is pending review; see the note in docs.
 	{
 		"doctype": "LMS Google Meet Settings",
 		"owner_field": "member",
-		"scrub": {"account_name": None, "google_calendar": None, "enabled": 0},
+		"scrub": {
+			"account_name": UNIQUE_ERASED_MARKER,
+			"google_calendar": None,
+			"enabled": 0,
+		},
 	},
 	# account_id, client_id and client_secret are mandatory on this
 	# doctype, so they are replaced with a marker rather than emptied:

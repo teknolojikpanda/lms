@@ -474,3 +474,40 @@ class TestDataSubjectRights(IntegrationTestCase):
 			if not frappe.get_meta(doctype).get_field(field):
 				wrong.append(f"{doctype}.{field}")
 		self.assertEqual(wrong, [], f"registry names fields that do not exist: {wrong}")
+
+
+class TestScrubbedRowsStaySavable(IntegrationTestCase):
+	"""A scrubbed row must still satisfy its own doctype.
+
+	`db.set_value` bypasses validation during erasure, so a NULL is
+	written happily into a mandatory field and only fails later — the
+	next time anything loads and saves the row. That turns an erasure
+	into a landmine under whatever touches the record next.
+	"""
+
+	def test_mandatory_fields_are_never_scrubbed_to_null(self):
+		"""Checked against the doctype, not against a hand-kept list.
+
+		`LMS Google Meet Settings` nulled `account_name`, which is
+		mandatory *and* the autoname field, while the Zoom entry directly
+		below it already documented exactly this hazard.
+		"""
+		offenders = []
+		for source in PERSONAL_DATA_SOURCES:
+			scrub = source.get("scrub") or {}
+			if not scrub:
+				continue
+			meta = frappe.get_meta(source["doctype"])
+			for fieldname, value in scrub.items():
+				if value is not None:
+					continue
+				field = meta.get_field(fieldname)
+				if field and field.reqd:
+					offenders.append(f"{source['doctype']}.{fieldname}")
+
+		self.assertEqual(
+			offenders,
+			["LMS Google Meet Settings.google_calendar"],
+			"a mandatory field is scrubbed to NULL, leaving the row unsavable: "
+			f"{offenders}",
+		)
