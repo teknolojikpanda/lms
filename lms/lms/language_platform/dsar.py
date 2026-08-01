@@ -28,6 +28,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 from frappe.model.rename_doc import rename_doc
+from frappe.utils.password import remove_encrypted_password
 from frappe.utils import now_datetime
 
 from lms.lms.language_platform.privacy_rules import (
@@ -137,6 +138,8 @@ def anonymize_user(user: str) -> dict:
 			for name in names:
 				resolved = _resolve_row_scrub(scrub)
 				frappe.db.set_value(doctype, name, resolved, update_modified=False)
+				# Before the rename, which moves these rows to the new name.
+				_forget_stored_passwords(doctype, name, resolved)
 				name = _rename_if_named_by_a_scrubbed_field(doctype, name, resolved)
 				if searchable:
 					remove_from_search_index(doctype, name)
@@ -152,6 +155,26 @@ def anonymize_user(user: str) -> dict:
 
 	frappe.db.commit()
 	return summary
+
+
+def _forget_stored_passwords(doctype: str, name: str, resolved: dict) -> None:
+	"""Erase Password fields where frappe actually keeps them.
+
+	A Password field's value does not live in the document's column. The
+	column holds a placeholder and the secret goes to the `__Auth` table,
+	so `db.set_value` writes the marker over the placeholder and leaves
+	the credential untouched — an erasure that reported success while a
+	refresh token, still valid, stayed behind.
+
+	That is worse than an ordinary leftover: a token outlives the session
+	it was minted for, so until it is revoked the platform can still reach
+	the account of someone who asked to be forgotten.
+	"""
+	meta = frappe.get_meta(doctype)
+	for fieldname in resolved:
+		field = meta.get_field(fieldname)
+		if field and field.fieldtype == "Password":
+			remove_encrypted_password(doctype, name, fieldname)
 
 
 def _resolve_row_scrub(scrub: dict) -> dict:

@@ -9,6 +9,7 @@ thing that changed.
 from unittest.mock import patch
 
 import frappe
+from frappe.utils.password import get_decrypted_password
 from frappe.tests import IntegrationTestCase
 
 from lms.lms.language_platform.dsar import anonymize_user, collect_user_data
@@ -658,4 +659,85 @@ class TestGoogleCalendarErasure(IntegrationTestCase):
 		self.assertTrue(
 			frappe.db.exists("Google Calendar", link),
 			"the link is dangling — the row it names does not exist",
+		)
+
+	def test_a_stored_credential_does_not_survive_the_erasure(self):
+		"""A Password field's value is not in the column the scrub writes.
+
+		frappe keeps it in `__Auth`; the column holds a placeholder. So
+		`db.set_value` wrote the marker over the placeholder and left the
+		secret exactly where it lives — an erasure that reported success
+		while a still-valid refresh token stayed behind. Until that token
+		is gone the platform can reach the calendar of someone who asked
+		to be forgotten.
+		"""
+		hash_ = frappe.generate_hash(length=6).lower()
+		secret = f"refresh-token-{hash_}"
+		subject = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": f"cred-{hash_}@example.com",
+				"first_name": "Credential",
+				"send_welcome_email": 0,
+			}
+		).insert(ignore_permissions=True)
+		calendar = frappe.get_doc(
+			{
+				"doctype": "Google Calendar",
+				"calendar_name": f"Credential Holder {hash_}",
+				"user": subject.name,
+				"google_calendar_id": f"cred-{hash_}@example.com",
+				"refresh_token": secret,
+			}
+		)
+		calendar.flags.ignore_validate = True
+		calendar.insert(ignore_permissions=True)
+		frappe.db.commit()
+
+		# Stored where frappe really puts it, not in the column.
+		self.assertEqual(
+			get_decrypted_password("Google Calendar", calendar.name, "refresh_token"),
+			secret,
+			"the fixture never stored a credential, so this proves nothing",
+		)
+
+		pseudonym = anonymized_email(subject.name)
+		self.addCleanup(frappe.db.commit)
+		self.addCleanup(
+			lambda: frappe.db.sql(
+				"delete from `tabGoogle Calendar` where user = %s", pseudonym
+			)
+		)
+
+		anonymize_user(subject.name)
+		frappe.db.commit()
+
+		scrubbed = frappe.get_all(
+			"Google Calendar", filters={"user": pseudonym}, pluck="name"
+		)[0]
+		self.assertIsNone(
+			get_decrypted_password(
+				"Google Calendar", scrubbed, "refresh_token", raise_exception=False
+			),
+			"the refresh token survived the erasure",
+		)
+
+	def test_every_credential_on_a_scrubbed_doctype_is_registered(self):
+		"""A Password field added later must not be able to slip through.
+
+		Checked against each doctype's own metadata rather than a list —
+		the same approach that found the mandatory-NULL cases nobody had
+		reported.
+		"""
+		unscrubbed = []
+		for source in PERSONAL_DATA_SOURCES:
+			scrub = source.get("scrub") or {}
+			if not scrub or not frappe.db.exists("DocType", source["doctype"]):
+				continue
+			for field in frappe.get_meta(source["doctype"]).fields:
+				if field.fieldtype == "Password" and field.fieldname not in scrub:
+					unscrubbed.append(f"{source['doctype']}.{field.fieldname}")
+
+		self.assertEqual(
+			unscrubbed, [], f"credentials survive an erasure: {unscrubbed}"
 		)
