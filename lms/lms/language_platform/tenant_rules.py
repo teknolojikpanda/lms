@@ -185,6 +185,13 @@ def purge_eligibility(
 	if archived_at is None:
 		return {"eligible": False, "days_remaining": None, "reason": "Tenant is not archived."}
 
+	# `datetime.now()` is the *system* clock; every `archived_at` this
+	# receives is frappe's site-local naive time. On a site whose timezone
+	# is ahead of UTC the two differ by the offset, and since a partial day
+	# rounds up, that silently adds a day to every grace period — and
+	# blocks a zero-day archival outright, because the moment it was
+	# archived reads as still in the future. Callers pass the same clock
+	# they stored; this default is only for direct rule tests.
 	now = now or datetime.now()
 	purge_at = purge_after_date(archived_at, grace_days)
 	remaining = (purge_at - now).total_seconds() / 86400

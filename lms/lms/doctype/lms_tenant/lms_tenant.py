@@ -352,6 +352,7 @@ def get_purge_readiness(tenant: str) -> dict:
 	eligibility = purge_eligibility(
 		get_datetime(doc.archived_at) if doc.archived_at else None,
 		_effective_grace_days(doc),
+		now=now_datetime(),
 	)
 
 	blockers = []
@@ -389,10 +390,21 @@ def record_archival_artifacts(subdomain: str, export_location: str, backup_verif
 def _effective_grace_days(doc) -> int:
 	"""The grace period this tenant was archived under.
 
-	Falls back to the default for tenants archived before the period was
-	persisted, which matches what those archivals were judged against.
+	Falls back to the default only when nothing was persisted, which
+	matches what archivals from before that field existed were judged
+	against.
+
+	Zero is a value, not an absence. `archive_tenant` accepts and stores
+	``grace_days=0`` — an offboarding with no waiting period, which is
+	what a tenant that has already been fully exported and signed off
+	should get — and a falsy check turned that into the 90-day default,
+	refusing a purge the operator had explicitly authorised straight
+	away. That is the same defect this function was written to fix, one
+	value along: an override silently replaced by the default.
 	"""
-	return int(doc.grace_days) if doc.grace_days else DEFAULT_GRACE_DAYS
+	if doc.grace_days is None or doc.grace_days == "":
+		return DEFAULT_GRACE_DAYS
+	return max(0, int(doc.grace_days))
 
 
 def assert_purge_allowed(subdomain: str) -> dict:
@@ -411,6 +423,7 @@ def assert_purge_allowed(subdomain: str) -> dict:
 			backup_verified=bool(doc.backup_verified),
 			export_location=doc.export_location,
 			grace_days=_effective_grace_days(doc),
+			now=now_datetime(),
 		)
 	except PurgeNotAllowed as e:
 		frappe.throw(str(e), title=_("Purge Refused"))
@@ -435,6 +448,7 @@ def mark_purged(subdomain: str, notes: str | None = None):
 			backup_verified=bool(doc.backup_verified),
 			export_location=doc.export_location,
 			grace_days=_effective_grace_days(doc),
+			now=now_datetime(),
 		)
 	except PurgeNotAllowed as e:
 		frappe.throw(str(e), title=_("Purge Refused"))
