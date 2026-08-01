@@ -171,3 +171,68 @@ class TestRetryDispatchOrder(IntegrationTestCase):
 			[oldest, middle, newest],
 			"due retries were not dispatched oldest first",
 		)
+
+	def test_a_backlog_larger_than_the_batch_makes_progress(self):
+		"""The starvation case the ordering exists for.
+
+		With three due and a batch of two, an unordered query can return
+		the same two every pass — so the third waits for good. Ordering
+		makes each pass take the oldest that remain, so the backlog
+		drains.
+		"""
+		oldest = self._queued(minutes_overdue=90)
+		middle = self._queued(minutes_overdue=60)
+		newest = self._queued(minutes_overdue=30)
+		mine = {oldest, middle, newest}
+
+		dispatched = []
+		with patch(
+			"lms.lms.language_platform.speaking_pipeline.SWEEP_BATCH_SIZE", 2
+		), patch(
+			"lms.lms.language_platform.speaking_pipeline.enqueue_processing"
+		) as enqueue:
+			dispatch_due_retries()
+			first_pass = [c.args[0] for c in enqueue.call_args_list if c.args[0] in mine]
+			dispatched.extend(first_pass)
+
+			# The dispatcher does not change status — _claim does, in the
+			# worker — so simulate the first pass having been taken up,
+			# which is what lets the next pass see the remainder.
+			for name in first_pass:
+				frappe.db.set_value(
+					"LMS Speaking Submission", name, "status", "Scoring", update_modified=False
+				)
+			frappe.db.commit()
+
+			enqueue.reset_mock()
+			dispatch_due_retries()
+			dispatched.extend(c.args[0] for c in enqueue.call_args_list if c.args[0] in mine)
+
+		self.assertEqual(
+			dispatched[:2], [oldest, middle], "the first pass did not take the two oldest"
+		)
+		self.assertIn(newest, dispatched, "the newest was never reached — the backlog stalled")
+
+	def test_submissions_due_at_the_same_moment_go_oldest_created_first(self):
+		"""`retry_after asc, creation asc` — the tie-breaker is load-bearing.
+
+		A batch of failures retried together share a `retry_after` to the
+		second, so without the secondary key their order is arbitrary
+		again for exactly the group most likely to exceed the batch.
+		"""
+		same_moment = add_to_date(now_datetime(), minutes=-10)
+		first = self._queued(minutes_overdue=10)
+		second = self._queued(minutes_overdue=10)
+		for name in (first, second):
+			frappe.db.set_value(
+				"LMS Speaking Submission", name, "retry_after", same_moment, update_modified=False
+			)
+		frappe.db.commit()
+
+		with patch(
+			"lms.lms.language_platform.speaking_pipeline.enqueue_processing"
+		) as enqueue:
+			dispatch_due_retries()
+
+		ordered = [c.args[0] for c in enqueue.call_args_list if c.args[0] in (first, second)]
+		self.assertEqual(ordered, [first, second], "the earlier-created submission did not go first")
