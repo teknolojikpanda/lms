@@ -1,13 +1,17 @@
 <template>
 	<div class="relative flex h-screen flex-col">
-		<div
+		<SkipLink target-id="scrollContainer" />
+		<main
 			class="flex flex-1 flex-col overflow-y-auto pb-10"
 			id="scrollContainer"
+			tabindex="-1"
 		>
 			<slot />
-		</div>
+		</main>
 
-		<div class="relative z-20">
+		<WhiteboardExit />
+
+		<div class="relative z-20" data-whiteboard-hide>
 			<!-- Dropdown menu -->
 			<div
 				class="fixed bottom-16 end-2 w-[80%] space-y-4 rounded-md bg-surface-base p-5 text-base shadow-md"
@@ -57,6 +61,8 @@
 	</div>
 </template>
 <script setup>
+import SkipLink from '@/components/SkipLink.vue'
+import WhiteboardExit from '@/components/WhiteboardExit.vue'
 import { getSidebarLinks } from '@/utils'
 import { useRouter } from 'vue-router'
 import { call } from 'frappe-ui'
