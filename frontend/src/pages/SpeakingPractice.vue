@@ -221,6 +221,7 @@ import { useRouter } from 'vue-router'
 import { sessionStore } from '@/stores/session'
 import { formatSeconds } from '@/utils/format'
 import { createSpeakingSubmission, getSpeakingResult, uploadBlob } from '@/utils/langApi'
+import { recordedSeconds, isOverRecordingLimit } from '@/utils/recordingClock'
 
 const { brand } = sessionStore()
 const user = inject('$user')
@@ -240,6 +241,8 @@ let mediaRecorder = null
 let mediaStream = null
 let chunks = []
 let recordInterval = null
+// Wall-clock anchor for the recording length; see startRecording.
+let recordStartedAt = null
 let pollInterval = null
 
 onMounted(() => {
@@ -324,14 +327,33 @@ const startRecording = async () => {
 	mediaRecorder.start()
 	recording.value = true
 	recordSeconds.value = 0
+	recordStartedAt = Date.now()
 	recordInterval = setInterval(() => {
-		recordSeconds.value += 1
+		// Elapsed wall time, not one tick per callback — see recordingClock.
+		recordSeconds.value = recordedSeconds(
+			recordStartedAt,
+			Date.now(),
+			maxDuration.value
+		)
 		// §8.13 MUST: hard stop at the configured limit
-		if (recordSeconds.value >= maxDuration.value) stopRecording()
+		if (isOverRecordingLimit(recordStartedAt, Date.now(), maxDuration.value)) {
+			stopRecording()
+		}
 	}, 1000)
 }
 
 const stopRecording = () => {
+	// The interval may not have fired since the tab was throttled, so take
+	// the elapsed time here too rather than trusting the last tick — this
+	// is the value the server's quota check receives.
+	if (recordStartedAt) {
+		recordSeconds.value = recordedSeconds(
+			recordStartedAt,
+			Date.now(),
+			maxDuration.value
+		)
+		recordStartedAt = null
+	}
 	if (recordInterval) clearInterval(recordInterval)
 	if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop()
 	mediaStream?.getTracks().forEach((track) => track.stop())
@@ -339,12 +361,14 @@ const stopRecording = () => {
 }
 
 const cleanupRecorder = () => {
+	recordStartedAt = null
 	if (recordInterval) clearInterval(recordInterval)
 	if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop()
 	mediaStream?.getTracks().forEach((track) => track.stop())
 }
 
 const resetRecordingState = () => {
+	recordStartedAt = null
 	audioBlob.value = null
 	if (audioURL.value) URL.revokeObjectURL(audioURL.value)
 	audioURL.value = null
