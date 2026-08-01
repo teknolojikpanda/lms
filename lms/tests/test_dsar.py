@@ -596,6 +596,21 @@ class TestGoogleCalendarErasure(IntegrationTestCase):
 		# exist for the erasure to find it.
 		calendar.flags.ignore_validate = True
 		calendar.insert(ignore_permissions=True)
+
+		# The reason this disposition exists: a mandatory Link pointing at
+		# the calendar. Without a row holding one, the test would prove the
+		# calendar is scrubbed and nothing about the link staying valid.
+		meet = frappe.get_doc(
+			{
+				"doctype": "LMS Google Meet Settings",
+				"member": subject.name,
+				"account_name": f"Meet {hash_}",
+				"google_calendar": calendar.name,
+				"enabled": 1,
+			}
+		)
+		meet.flags.ignore_validate = True
+		meet.insert(ignore_permissions=True)
 		frappe.db.commit()
 		# The subject is renamed by the erasure, so clean up by the
 		# pseudonym rather than the original address — filtering on the old
@@ -627,4 +642,20 @@ class TestGoogleCalendarErasure(IntegrationTestCase):
 		self.assertFalse(
 			frappe.db.exists("Google Calendar", calendar.name),
 			"the original identifying name is still a row",
+		)
+
+		# And the link that made scrubbing impossible still resolves. The
+		# calendar was renamed, so this also checks the rename carried the
+		# reference with it rather than leaving it dangling.
+		surviving_meet = frappe.get_all(
+			"LMS Google Meet Settings", filters={"member": pseudonym}, pluck="name"
+		)
+		self.assertEqual(len(surviving_meet), 1, "the Meet settings row did not survive")
+		link = frappe.db.get_value(
+			"LMS Google Meet Settings", surviving_meet[0], "google_calendar"
+		)
+		self.assertEqual(link, surviving[0], "the link no longer points at the calendar")
+		self.assertTrue(
+			frappe.db.exists("Google Calendar", link),
+			"the link is dangling — the row it names does not exist",
 		)
