@@ -70,10 +70,16 @@ def dispatch_due_retries():
 	deduplicates on a stable job id, so overlapping passes cannot stack
 	duplicate jobs, and _claim refuses anything not actually due.
 	"""
+	# Oldest due first. With more submissions due than the batch takes,
+	# an unordered query lets the database decide who waits — and it can
+	# decide the same way every pass, so one student's recording is
+	# starved indefinitely while later ones are dispatched ahead of it.
+	# Ordering by when each became due makes the queue a queue.
 	due = frappe.get_all(
 		"LMS Speaking Submission",
 		filters={"status": "Queued", "retry_after": ["<=", now_datetime()]},
 		pluck="name",
+		order_by="retry_after asc, creation asc",
 		limit=SWEEP_BATCH_SIZE,
 	)
 	for name in due:
