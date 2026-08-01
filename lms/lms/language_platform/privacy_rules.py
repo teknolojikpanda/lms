@@ -108,20 +108,42 @@ PERSONAL_DATA_SOURCES = [
 	# validation during erasure, so a NULL is written happily and then
 	# fails the next time anything loads and saves the row.
 	#
-	# KNOWN GAP: `google_calendar` is likewise mandatory and is still
-	# nulled here, so a scrubbed row remains unsavable. It is a Link, so a
-	# marker would only be a dangling reference — the fix is either to
-	# leave the link and bring Google Calendar into this list, or to
-	# detach the referring Batch/Live Class fields and purge the row
-	# outright. That is a retention decision rather than an engineering
-	# one and is pending review; see the note in docs.
+	# `google_calendar` is left alone. It is a mandatory Link, so nulling
+	# it left the row unsavable and a marker would only be a dangling
+	# reference. The calendar it points at is erased at its own source —
+	# see the Google Calendar entry below — which is the disposition that
+	# actually removes the personal data while keeping every row valid and
+	# every Batch reference intact.
 	{
 		"doctype": "LMS Google Meet Settings",
 		"owner_field": "member",
 		"scrub": {
 			"account_name": UNIQUE_ERASED_MARKER,
-			"google_calendar": None,
 			"enabled": 0,
+		},
+	},
+	# Frappe's own doctype, reached through LMS Google Meet Settings.
+	# Registered rather than purged so the Link above stays valid: the row
+	# survives, emptied. `calendar_name` is mandatory *and* the autoname
+	# field — it usually holds the person's name — so it takes the unique
+	# marker; `google_calendar_id` is normally their email address.
+	#
+	# The OAuth material is cleared as well. A refresh token outlives the
+	# session it was minted for, so an erasure that leaves one behind has
+	# not ended the platform's access to that person's calendar.
+	{
+		"doctype": "Google Calendar",
+		"owner_field": "user",
+		"scrub": {
+			"calendar_name": UNIQUE_ERASED_MARKER,
+			"google_calendar_id": ERASED_MARKER,
+			"refresh_token": ERASED_MARKER,
+			"authorization_code": ERASED_MARKER,
+			"next_sync_token": ERASED_MARKER,
+			"enable": 0,
+			"pull_from_google_calendar": 0,
+			"push_to_google_calendar": 0,
+			"sync_as_public": 0,
 		},
 	},
 	# account_id, client_id and client_secret are mandatory on this

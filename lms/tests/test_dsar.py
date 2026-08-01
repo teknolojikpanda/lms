@@ -411,6 +411,7 @@ class TestDataSubjectRights(IntegrationTestCase):
 		A credential added later without a scrub rule would otherwise
 		survive an erasure silently.
 		"""
+		registered = {s["doctype"] for s in PERSONAL_DATA_SOURCES}
 		for doctype in ("LMS Zoom Settings", "LMS Google Meet Settings"):
 			source = next(s for s in PERSONAL_DATA_SOURCES if s["doctype"] == doctype)
 			scrubbed = set(source.get("scrub") or {})
@@ -418,6 +419,12 @@ class TestDataSubjectRights(IntegrationTestCase):
 			leftovers = []
 			for field in frappe.get_meta(doctype).fields:
 				if field.fieldname in accounted or field.fetch_from:
+					continue
+				# A Link is accounted for when the doctype it points at is
+				# itself registered: the personal data lives there and is
+				# erased at its own source, which is what lets this row keep
+				# a valid reference instead of a NULL or a dangling marker.
+				if field.fieldtype == "Link" and field.options in registered:
 					continue
 				if field.fieldtype in ("Section Break", "Column Break", "Tab Break"):
 					continue
@@ -507,7 +514,148 @@ class TestScrubbedRowsStaySavable(IntegrationTestCase):
 
 		self.assertEqual(
 			offenders,
-			["LMS Google Meet Settings.google_calendar"],
+			[],
 			"a mandatory field is scrubbed to NULL, leaving the row unsavable: "
 			f"{offenders}",
+		)
+
+
+class TestGoogleCalendarErasure(IntegrationTestCase):
+	"""The calendar behind a Google Meet setting is erased at its source.
+
+	`LMS Google Meet Settings.google_calendar` is a mandatory Link, so it
+	could be neither nulled nor markered without leaving the row invalid.
+	Registering the target instead removes the personal data — the
+	person's name, their calendar address, and the OAuth tokens — while
+	the settings row keeps a valid reference and every Batch link to it
+	stays intact.
+	"""
+
+	def test_google_calendar_is_registered(self):
+		source = next(
+			(s for s in PERSONAL_DATA_SOURCES if s["doctype"] == "Google Calendar"), None
+		)
+		self.assertIsNotNone(source, "Google Calendar is not classified")
+		self.assertEqual(source["owner_field"], "user")
+
+	def test_the_link_from_google_meet_settings_is_left_intact(self):
+		"""Nulling it was the defect; it must not come back."""
+		meet = next(
+			s for s in PERSONAL_DATA_SOURCES if s["doctype"] == "LMS Google Meet Settings"
+		)
+		self.assertNotIn("google_calendar", meet.get("scrub") or {})
+
+	def test_the_oauth_material_is_cleared(self):
+		"""A refresh token outlives the session it was minted for.
+
+		An erasure that leaves one behind has not ended the platform's
+		access to that person's calendar.
+		"""
+		scrub = next(
+			s for s in PERSONAL_DATA_SOURCES if s["doctype"] == "Google Calendar"
+		)["scrub"]
+		for credential in ("refresh_token", "authorization_code", "next_sync_token"):
+			self.assertIn(credential, scrub, f"{credential} survives an erasure")
+
+	def test_the_identifying_fields_are_covered(self):
+		"""calendar_name is the primary key and usually the person's name."""
+		scrub = next(
+			s for s in PERSONAL_DATA_SOURCES if s["doctype"] == "Google Calendar"
+		)["scrub"]
+		self.assertEqual(scrub["calendar_name"], UNIQUE_ERASED_MARKER)
+		self.assertIn("google_calendar_id", scrub)
+
+	def test_a_real_calendar_row_is_scrubbed_and_still_linked(self):
+		"""End to end, not just registry bookkeeping.
+
+		The row must survive — a Google Meet setting holds a mandatory
+		Link to it — carry none of the person's data, and still be
+		reachable through that link.
+		"""
+		hash_ = frappe.generate_hash(length=6).lower()
+		email = f"cal-{hash_}@example.com"
+		subject = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": email,
+				"first_name": "Calendar",
+				"last_name": "Subject",
+				"send_welcome_email": 0,
+			}
+		).insert(ignore_permissions=True)
+		calendar = frappe.get_doc(
+			{
+				"doctype": "Google Calendar",
+				"calendar_name": f"Calendar Subject {hash_}",
+				"user": subject.name,
+				"google_calendar_id": email,
+			}
+		)
+		# The doctype refuses to save unless Google API credentials are
+		# configured site-wide. Irrelevant here — the fixture only has to
+		# exist for the erasure to find it.
+		calendar.flags.ignore_validate = True
+		calendar.insert(ignore_permissions=True)
+
+		# The reason this disposition exists: a mandatory Link pointing at
+		# the calendar. Without a row holding one, the test would prove the
+		# calendar is scrubbed and nothing about the link staying valid.
+		meet = frappe.get_doc(
+			{
+				"doctype": "LMS Google Meet Settings",
+				"member": subject.name,
+				"account_name": f"Meet {hash_}",
+				"google_calendar": calendar.name,
+				"enabled": 1,
+			}
+		)
+		meet.flags.ignore_validate = True
+		meet.insert(ignore_permissions=True)
+		frappe.db.commit()
+		# The subject is renamed by the erasure, so clean up by the
+		# pseudonym rather than the original address — filtering on the old
+		# one silently matches nothing and leaks rows into the next test.
+		pseudonym = anonymized_email(subject.name)
+		self.addCleanup(frappe.db.commit)
+		self.addCleanup(
+			lambda: frappe.db.sql(
+				"delete from `tabGoogle Calendar` where user = %s", pseudonym
+			)
+		)
+
+		anonymize_user(subject.name)
+		frappe.db.commit()
+
+		# Scoped to this subject: other tests leave scrubbed calendars
+		# behind, so counting every erased row would be a suite-order bug.
+		surviving = frappe.get_all(
+			"Google Calendar", filters={"user": pseudonym}, pluck="name"
+		)
+		self.assertEqual(len(surviving), 1, "the calendar row did not survive the erasure")
+		# Renamed, because calendar_name is the autoname field.
+		self.assertNotIn(hash_, surviving[0], "the person's name survived as the primary key")
+		self.assertEqual(
+			frappe.db.get_value("Google Calendar", surviving[0], "google_calendar_id"),
+			ERASED_MARKER,
+			"the calendar address survived",
+		)
+		self.assertFalse(
+			frappe.db.exists("Google Calendar", calendar.name),
+			"the original identifying name is still a row",
+		)
+
+		# And the link that made scrubbing impossible still resolves. The
+		# calendar was renamed, so this also checks the rename carried the
+		# reference with it rather than leaving it dangling.
+		surviving_meet = frappe.get_all(
+			"LMS Google Meet Settings", filters={"member": pseudonym}, pluck="name"
+		)
+		self.assertEqual(len(surviving_meet), 1, "the Meet settings row did not survive")
+		link = frappe.db.get_value(
+			"LMS Google Meet Settings", surviving_meet[0], "google_calendar"
+		)
+		self.assertEqual(link, surviving[0], "the link no longer points at the calendar")
+		self.assertTrue(
+			frappe.db.exists("Google Calendar", link),
+			"the link is dangling — the row it names does not exist",
 		)
