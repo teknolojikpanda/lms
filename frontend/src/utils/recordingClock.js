@@ -24,8 +24,14 @@ export function recordedSeconds(startedAt, now) {
 	return Math.max(elapsed, 0)
 }
 
-/** Whether the §8.13 hard stop has been reached. */
+/**
+ * Whether the §8.13 hard stop has been reached.
+ *
+ * Measured with `recordedSeconds` rather than its own arithmetic, so the
+ * duration that stops a recording and the duration reported for it can
+ * never drift apart.
+ */
 export function isOverRecordingLimit(startedAt, now, maxDuration) {
 	if (!startedAt || !maxDuration) return false
-	return Math.floor((now - startedAt) / 1000) >= maxDuration
+	return recordedSeconds(startedAt, now) >= maxDuration
 }
