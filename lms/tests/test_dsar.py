@@ -862,3 +862,26 @@ class TestErasureAudit(IntegrationTestCase):
 			[entry["name"] for entry in report["unreadable"]],
 			"a row nobody could check was reported as clean",
 		)
+
+	def test_a_bug_in_the_audit_is_not_reported_as_an_unreadable_row(self):
+		"""A mistake here must fail the run, not fill the report.
+
+		Absorbed, a TypeError would print as "could not be checked" on
+		every row — indistinguishable from a rotated key, sending an
+		operator to look at the encryption key instead of the tool.
+		"""
+		with patch(
+			"lms.lms.language_platform.erasure_audit.get_decrypted_password",
+			side_effect=TypeError("wrong arity"),
+		):
+			with self.assertRaises(TypeError):
+				run_erasure_audit()
+
+	def test_a_decryption_failure_is_still_absorbed(self):
+		"""The guard above must not swallow the case it was built for."""
+		with patch(
+			"lms.lms.language_platform.erasure_audit.get_decrypted_password",
+			side_effect=ValueError("key rotated"),
+		):
+			report = run_erasure_audit()
+		self.assertIsInstance(report["unreadable"], list)

@@ -32,6 +32,12 @@ from frappe.utils.password import get_decrypted_password
 from lms.lms.language_platform.privacy_rules import PERSONAL_DATA_SOURCES
 
 
+# Raised by this module being wrong, not by a credential being unreadable.
+# Anything here propagates so the run fails loudly rather than reporting a
+# site full of rows nobody could check.
+BUGS_NOT_DATA = (TypeError, AttributeError, NameError, ImportError)
+
+
 def _credential_fields(doctype: str) -> list[str]:
 	return [f.fieldname for f in frappe.get_meta(doctype).fields if f.fieldtype == "Password"]
 
@@ -53,6 +59,12 @@ def _inspect(doctype: str, name: str, fields: list[str]) -> tuple[list[str], lis
 	for fieldname in fields:
 		try:
 			value = get_decrypted_password(doctype, name, fieldname, raise_exception=False)
+		except BUGS_NOT_DATA:
+			# A mistake in this module is not an undecryptable credential.
+			# Absorbed, it would print as "could not be checked" on every
+			# row — indistinguishable from a rotated key, and an operator
+			# would go looking at the encryption key instead of the tool.
+			raise
 		except Exception as error:
 			unreadable.append(
 				{
