@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 import frappe
 from frappe.utils.password import get_decrypted_password
+
+from lms.lms.language_platform.erasure_audit import run as run_erasure_audit
 from frappe.tests import IntegrationTestCase
 
 from lms.lms.language_platform.dsar import anonymize_user, collect_user_data
@@ -741,3 +743,145 @@ class TestGoogleCalendarErasure(IntegrationTestCase):
 		self.assertEqual(
 			unscrubbed, [], f"credentials survive an erasure: {unscrubbed}"
 		)
+
+
+class TestErasureAudit(IntegrationTestCase):
+	"""The audit has to be trustworthy in both directions.
+
+	A report that misses a live credential is worse than none — it would
+	close an incident review that should have stayed open.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")
+
+	def test_it_finds_a_credential_that_survived(self):
+		hash_ = frappe.generate_hash(length=6).lower()
+		calendar = frappe.get_doc(
+			{
+				"doctype": "Google Calendar",
+				"calendar_name": f"Audit Subject {hash_}",
+				"user": "Administrator",
+				"google_calendar_id": f"audit-{hash_}@example.com",
+				"refresh_token": f"live-token-{hash_}",
+			}
+		)
+		calendar.flags.ignore_validate = True
+		calendar.insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(frappe.db.commit)
+		self.addCleanup(
+			lambda: frappe.db.exists("Google Calendar", calendar.name)
+			and frappe.delete_doc(
+				"Google Calendar", calendar.name, force=True, ignore_permissions=True
+			)
+		)
+
+		flagged = [
+			entry for entry in run_erasure_audit()["recoverable"] if entry["name"] == calendar.name
+		]
+		self.assertEqual(len(flagged), 1, "a readable refresh token was not reported")
+		self.assertIn("refresh_token", flagged[0]["fields"])
+
+	def test_it_does_not_invent_one(self):
+		"""No credential stored, nothing reported for that row."""
+		hash_ = frappe.generate_hash(length=6).lower()
+		calendar = frappe.get_doc(
+			{
+				"doctype": "Google Calendar",
+				"calendar_name": f"Audit Empty {hash_}",
+				"user": "Administrator",
+				"google_calendar_id": f"empty-{hash_}@example.com",
+			}
+		)
+		calendar.flags.ignore_validate = True
+		calendar.insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(frappe.db.commit)
+		self.addCleanup(
+			lambda: frappe.db.exists("Google Calendar", calendar.name)
+			and frappe.delete_doc(
+				"Google Calendar", calendar.name, force=True, ignore_permissions=True
+			)
+		)
+
+		report = run_erasure_audit()
+		self.assertNotIn(
+			calendar.name, [entry["name"] for entry in report["recoverable"]]
+		)
+		self.assertGreater(report["credential_rows_checked"], 0, "nothing was inspected")
+
+	def test_it_reads_the_erasure_log(self):
+		report = run_erasure_audit()
+		self.assertIn("completed_erasures", report)
+		self.assertIn("site", report)
+
+	def test_an_undecryptable_row_is_neither_a_leak_nor_silence(self):
+		"""The distinction an incident review turns on.
+
+		A rotated key or a corrupt __Auth entry must not read as "clean" —
+		that row still needs revoking — and must not read as a leak
+		either, or an operator revokes a working credential on the
+		strength of a decryption error.
+		"""
+		hash_ = frappe.generate_hash(length=6).lower()
+		calendar = frappe.get_doc(
+			{
+				"doctype": "Google Calendar",
+				"calendar_name": f"Audit Broken {hash_}",
+				"user": "Administrator",
+				"google_calendar_id": f"broken-{hash_}@example.com",
+				"refresh_token": f"token-{hash_}",
+			}
+		)
+		calendar.flags.ignore_validate = True
+		calendar.insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(frappe.db.commit)
+		self.addCleanup(
+			lambda: frappe.db.exists("Google Calendar", calendar.name)
+			and frappe.delete_doc(
+				"Google Calendar", calendar.name, force=True, ignore_permissions=True
+			)
+		)
+
+		with patch(
+			"lms.lms.language_platform.erasure_audit.get_decrypted_password",
+			side_effect=ValueError("key rotated"),
+		):
+			report = run_erasure_audit()
+
+		self.assertNotIn(
+			calendar.name,
+			[entry["name"] for entry in report["recoverable"]],
+			"a decryption error was reported as a live credential",
+		)
+		self.assertIn(
+			calendar.name,
+			[entry["name"] for entry in report["unreadable"]],
+			"a row nobody could check was reported as clean",
+		)
+
+	def test_a_bug_in_the_audit_is_not_reported_as_an_unreadable_row(self):
+		"""A mistake here must fail the run, not fill the report.
+
+		Absorbed, a TypeError would print as "could not be checked" on
+		every row — indistinguishable from a rotated key, sending an
+		operator to look at the encryption key instead of the tool.
+		"""
+		with patch(
+			"lms.lms.language_platform.erasure_audit.get_decrypted_password",
+			side_effect=TypeError("wrong arity"),
+		):
+			with self.assertRaises(TypeError):
+				run_erasure_audit()
+
+	def test_a_decryption_failure_is_still_absorbed(self):
+		"""The guard above must not swallow the case it was built for."""
+		with patch(
+			"lms.lms.language_platform.erasure_audit.get_decrypted_password",
+			side_effect=ValueError("key rotated"),
+		):
+			report = run_erasure_audit()
+		self.assertIsInstance(report["unreadable"], list)
