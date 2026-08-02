@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 import frappe
 from frappe.utils.password import get_decrypted_password
+
+from lms.lms.language_platform.erasure_audit import run as run_erasure_audit
 from frappe.tests import IntegrationTestCase
 
 from lms.lms.language_platform.dsar import anonymize_user, collect_user_data
@@ -741,3 +743,76 @@ class TestGoogleCalendarErasure(IntegrationTestCase):
 		self.assertEqual(
 			unscrubbed, [], f"credentials survive an erasure: {unscrubbed}"
 		)
+
+
+class TestErasureAudit(IntegrationTestCase):
+	"""The audit has to be trustworthy in both directions.
+
+	A report that misses a live credential is worse than none — it would
+	close an incident review that should have stayed open.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")
+
+	def test_it_finds_a_credential_that_survived(self):
+		hash_ = frappe.generate_hash(length=6).lower()
+		calendar = frappe.get_doc(
+			{
+				"doctype": "Google Calendar",
+				"calendar_name": f"Audit Subject {hash_}",
+				"user": "Administrator",
+				"google_calendar_id": f"audit-{hash_}@example.com",
+				"refresh_token": f"live-token-{hash_}",
+			}
+		)
+		calendar.flags.ignore_validate = True
+		calendar.insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(frappe.db.commit)
+		self.addCleanup(
+			lambda: frappe.db.exists("Google Calendar", calendar.name)
+			and frappe.delete_doc(
+				"Google Calendar", calendar.name, force=True, ignore_permissions=True
+			)
+		)
+
+		flagged = [
+			entry for entry in run_erasure_audit()["recoverable"] if entry["name"] == calendar.name
+		]
+		self.assertEqual(len(flagged), 1, "a readable refresh token was not reported")
+		self.assertIn("refresh_token", flagged[0]["fields"])
+
+	def test_it_does_not_invent_one(self):
+		"""No credential stored, nothing reported for that row."""
+		hash_ = frappe.generate_hash(length=6).lower()
+		calendar = frappe.get_doc(
+			{
+				"doctype": "Google Calendar",
+				"calendar_name": f"Audit Empty {hash_}",
+				"user": "Administrator",
+				"google_calendar_id": f"empty-{hash_}@example.com",
+			}
+		)
+		calendar.flags.ignore_validate = True
+		calendar.insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(frappe.db.commit)
+		self.addCleanup(
+			lambda: frappe.db.exists("Google Calendar", calendar.name)
+			and frappe.delete_doc(
+				"Google Calendar", calendar.name, force=True, ignore_permissions=True
+			)
+		)
+
+		report = run_erasure_audit()
+		self.assertNotIn(
+			calendar.name, [entry["name"] for entry in report["recoverable"]]
+		)
+		self.assertGreater(report["credential_rows_checked"], 0, "nothing was inspected")
+
+	def test_it_reads_the_erasure_log(self):
+		report = run_erasure_audit()
+		self.assertIn("completed_erasures", report)
+		self.assertIn("site", report)
