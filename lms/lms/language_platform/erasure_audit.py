@@ -36,19 +36,36 @@ def _credential_fields(doctype: str) -> list[str]:
 	return [f.fieldname for f in frappe.get_meta(doctype).fields if f.fieldtype == "Password"]
 
 
-def _still_recoverable(doctype: str, name: str, fields: list[str]) -> list[str]:
-	found = []
+def _inspect(doctype: str, name: str, fields: list[str]) -> tuple[list[str], list[dict]]:
+	"""Split a row's credentials into readable ones and ones that errored.
+
+	A decryption failure is *not* evidence of a clean row. A rotated key
+	or a corrupt ``__Auth`` entry raises here, and reporting that as "no
+	credential" would let "three rows, all clean" and "three rows, none
+	readable" print identically — which for an audit is the failure that
+	matters, because the second still needs revoking and the first does
+	not.
+
+	So they are counted apart: never as leaks, never as silence.
+	"""
+	found: list[str] = []
+	unreadable: list[dict] = []
 	for fieldname in fields:
 		try:
 			value = get_decrypted_password(doctype, name, fieldname, raise_exception=False)
-		except Exception:
-			# A key rotation or a corrupt row reads as unrecoverable, which
-			# is the safe direction: it will not claim a leak that is not
-			# there. The row is still listed under `checked`.
-			value = None
+		except Exception as error:
+			unreadable.append(
+				{
+					"doctype": doctype,
+					"name": name,
+					"field": fieldname,
+					"error": f"{type(error).__name__}: {error}",
+				}
+			)
+			continue
 		if value:
 			found.append(fieldname)
-	return found
+	return found, unreadable
 
 
 def run() -> dict:
@@ -75,21 +92,24 @@ def run() -> dict:
 
 	checked = 0
 	recoverable: list[dict] = []
+	unreadable: list[dict] = []
 	for doctype in scrubbed:
 		fields = _credential_fields(doctype)
 		if not fields:
 			continue
 		for name in frappe.get_all(doctype, pluck="name", ignore_permissions=True):
 			checked += 1
-			leaked = _still_recoverable(doctype, name, fields)
+			leaked, errored = _inspect(doctype, name, fields)
 			if leaked:
 				recoverable.append({"doctype": doctype, "name": name, "fields": leaked})
+			unreadable.extend(errored)
 
 	report = {
 		"site": frappe.local.site,
 		"completed_erasures": erasures,
 		"credential_rows_checked": checked,
 		"recoverable": recoverable,
+		"unreadable": unreadable,
 	}
 
 	print(f"site: {report['site']}")
@@ -104,5 +124,13 @@ def run() -> dict:
 			print(f"  {entry['doctype']} {entry['name']}: {', '.join(entry['fields'])}")
 	else:
 		print("\nno recoverable credentials")
+
+	if unreadable:
+		# Never a leak, never silence: an operator must not revoke a working
+		# credential because decryption errored, and must not read a clean
+		# bill of health off rows nobody could check.
+		print(f"\ncould not be checked ({len(unreadable)}) — inspect before concluding:")
+		for entry in unreadable:
+			print(f"  {entry['doctype']} {entry['name']}.{entry['field']}: {entry['error']}")
 
 	return report

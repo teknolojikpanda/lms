@@ -816,3 +816,49 @@ class TestErasureAudit(IntegrationTestCase):
 		report = run_erasure_audit()
 		self.assertIn("completed_erasures", report)
 		self.assertIn("site", report)
+
+	def test_an_undecryptable_row_is_neither_a_leak_nor_silence(self):
+		"""The distinction an incident review turns on.
+
+		A rotated key or a corrupt __Auth entry must not read as "clean" —
+		that row still needs revoking — and must not read as a leak
+		either, or an operator revokes a working credential on the
+		strength of a decryption error.
+		"""
+		hash_ = frappe.generate_hash(length=6).lower()
+		calendar = frappe.get_doc(
+			{
+				"doctype": "Google Calendar",
+				"calendar_name": f"Audit Broken {hash_}",
+				"user": "Administrator",
+				"google_calendar_id": f"broken-{hash_}@example.com",
+				"refresh_token": f"token-{hash_}",
+			}
+		)
+		calendar.flags.ignore_validate = True
+		calendar.insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(frappe.db.commit)
+		self.addCleanup(
+			lambda: frappe.db.exists("Google Calendar", calendar.name)
+			and frappe.delete_doc(
+				"Google Calendar", calendar.name, force=True, ignore_permissions=True
+			)
+		)
+
+		with patch(
+			"lms.lms.language_platform.erasure_audit.get_decrypted_password",
+			side_effect=ValueError("key rotated"),
+		):
+			report = run_erasure_audit()
+
+		self.assertNotIn(
+			calendar.name,
+			[entry["name"] for entry in report["recoverable"]],
+			"a decryption error was reported as a live credential",
+		)
+		self.assertIn(
+			calendar.name,
+			[entry["name"] for entry in report["unreadable"]],
+			"a row nobody could check was reported as clean",
+		)
