@@ -31,7 +31,18 @@ fi
 
 export PATH="${NVM_DIR}/versions/node/v${NODE_VERSION_DEVELOP}/bin/:${PATH}"
 
-if [ -d "${BENCH_DIR}/apps/frappe" ]; then
+# The image ships a MariaDB 11.x client, which requires TLS by default;
+# the mariadb:10.8 service offers none, so `bench new-site` dies restoring
+# the framework schema with "ERROR 2026: SSL is required, but the server
+# does not support it". Traffic never leaves the compose network.
+printf '[client]\nskip-ssl\n' > "${HOME}/.my.cnf"
+
+# Written only after the site is fully set up. Testing for apps/frappe
+# instead would treat a bench whose site creation failed as finished, and
+# a restart would then serve a bench with no site.
+READY_MARKER="${BENCH_DIR}/.staging-ready"
+
+if [ -f "${READY_MARKER}" ]; then
     echo "==> Bench already initialised; starting."
     cd "${BENCH_DIR}"
     exec bench start
@@ -58,6 +69,10 @@ bench set-redis-socketio-host redis://redis:6379
 # Redis and the asset watcher run as their own containers / are not needed.
 sed -i '/redis/d' ./Procfile
 sed -i '/watch/d' ./Procfile
+# `bench serve` binds 127.0.0.1 by default, which Docker's port mapping
+# cannot reach: the site answers inside the container and the host gets
+# an empty reply on localhost:8000.
+sed -i 's/bench serve /bench serve --host 0.0.0.0 /' ./Procfile
 
 echo "==> Fetching payments (required by the lms app)"
 bench get-app payments
@@ -92,6 +107,7 @@ bench --site "${SITE}" set-config block_endpoints 1
 bench --site "${SITE}" set-config allow_tests true
 bench --site "${SITE}" clear-cache
 bench use "${SITE}"
+touch "${READY_MARKER}"
 
 echo "==> STAGING BENCH READY: ${SITE}"
 bench start
